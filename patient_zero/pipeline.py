@@ -9,7 +9,7 @@ One command does the whole run::
     python cli.py --adapter generic --input examples/fake_log.ndjson --out out/example
 
 ``--out`` must be outside the repo, or inside the repo's git-ignored ``out/``
-folder. Two files are written there:
+folder. Four files are written there:
 
 ``facts.json``
     Counts: input file names, sizes and SHA-256 hashes; parameters; loader
@@ -40,6 +40,17 @@ folder. Two files are written there:
     No row text, no page names. Blank and human rows have no label after
     loading, so their labels can never appear.
 
+``top_trees.json``
+    Node-level detail (one node per adopter: escaped label, minutes after the
+    first use, page family, wiki, status, source node) for the lead tree, the
+    largest tree, and the top 20 trees by largest branch overall and among
+    trees that beat every shuffle (``patient_zero.report.detail_set``).
+    ``--lead TOKEN_ID`` picks the lead tree and adds it if needed.
+
+``report.html``
+    The offline report built from the three files above
+    (``patient_zero.report``; no scripts, no external files).
+
 Strings taken from the data pass through ``short``: anything outside
 printable ASCII and every backslash is escaped, and the result is cut to 80
 characters. Nothing here opens a URL or runs a command from the data.
@@ -61,6 +72,7 @@ from statistics import median
 from typing import NamedTuple, Optional
 
 from patient_zero import nullmodel as N
+from patient_zero import report as R
 from patient_zero import score as S
 from patient_zero.cascade import STATUSES, build_trees
 from patient_zero.load import ADAPTERS, iso_utc, load
@@ -68,7 +80,7 @@ from patient_zero.safe import NO_FAMILY, SHORT_MAX, short, token_id  # noqa: F40
 from patient_zero.score import NARROW_RISKY, branch_sizes  # noqa: F401 (re-exported)
 from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
 
-FACTS_VERSION = 2
+FACTS_VERSION = 3
 TARGET_SECONDS = 300
 WIKI_FILES = ("revisions.jsonl.gz", "pages.jsonl.gz", "labels.jsonl.gz")
 CORE_KEYS = ("input", "params", "load", "tokens", "cascade", "trees", "families", "groups",
@@ -394,7 +406,7 @@ def _speed_slot(speed):
 
 
 def build_facts(result, records, files, params, trees_meta, code, started, total_seconds,
-                scores=None, risky=None):
+                scores=None, risky=None, outputs=None):
     """The facts.json object (counts, plus agent labels in the influence table)."""
     ts = result.token_stats
     cs = result.tree_stats
@@ -410,13 +422,13 @@ def build_facts(result, records, files, params, trees_meta, code, started, total
     facts = {
         "tool": "patient-zero",
         "facts_version": FACTS_VERSION,
-        "stage": "J6 full run: load, tokens, spread trees, shuffle baseline, scores (the report "
-                 "is a later stage)",
+        "stage": "J7 full run: load, tokens, spread trees, shuffle baseline, scores, report",
         "input": {"adapter": params["adapter"], "files": files},
         "params": {
             "min_agents": params["min_agents"],
             "max_phrase_share": params["max_phrase_share"],
             "given_texts": params["given_texts"],
+            "lead": params.get("lead"),
             "shuffles": shuffles,
             "seed": result.null.seed if result.null is not None else None,
             "shuffle_scope": result.null.scope if result.null is not None else None,
@@ -430,7 +442,7 @@ def build_facts(result, records, files, params, trees_meta, code, started, total
         "families": _family_table(result),
         "groups": _group_table(result),
         "risky": risky,
-        "outputs": {"trees.jsonl": trees_meta},
+        "outputs": outputs if outputs is not None else {"trees.jsonl": trees_meta},
         "nullmodel": null_facts,
         "scores": scores,
     }
@@ -484,8 +496,11 @@ def build_facts(result, records, files, params, trees_meta, code, started, total
     return facts
 
 
-def write_outputs(out_dir, result, params, started_clock, started_utc):
-    """Write trees.jsonl and facts.json to out_dir. Returns the facts object."""
+def write_outputs(out_dir, result, params, started_clock, started_utc, report=True):
+    """Write trees.jsonl, top_trees.json, facts.json and report.html to out_dir. Returns the facts object.
+
+    ``params["lead"]`` (a token_id or None) picks the report's lead tree.
+    """
     os.makedirs(out_dir, exist_ok=True)
     t0 = time.perf_counter()
     records = tree_records(result)
@@ -493,6 +508,15 @@ def write_outputs(out_dir, result, params, started_clock, started_utc):
     trees_path = os.path.join(out_dir, "trees.jsonl")
     _write_atomic(trees_path, lines)
     trees_meta = {"lines": len(records), "sha256": hashlib.sha256(lines.encode("ascii")).hexdigest()}
+    detail = R.detail_set(result, records, lead=params.get("lead"))
+    detail_text = R.detail_text(detail)
+    _write_atomic(os.path.join(out_dir, "top_trees.json"), detail_text)
+    outputs = {
+        "trees.jsonl": trees_meta,
+        "top_trees.json": {"trees": len(detail["trees"]), "lead": detail["lead"],
+                           "lead_rule": detail["lead_rule"], "scale": detail["scale"],
+                           "sha256": hashlib.sha256(detail_text.encode("utf-8")).hexdigest()},
+    }
     result.seconds["records"] = time.perf_counter() - t0
     t0 = time.perf_counter()
     scores = S.build_scores(result, records)
@@ -504,8 +528,10 @@ def write_outputs(out_dir, result, params, started_clock, started_utc):
     result.seconds["hash_and_code_info"] = time.perf_counter() - t0
     total = time.perf_counter() - started_clock
     facts = build_facts(result, records, files, params, trees_meta, code, started_utc, total,
-                        scores=scores, risky=risky)
+                        scores=scores, risky=risky, outputs=outputs)
     _write_atomic(os.path.join(out_dir, "facts.json"), json.dumps(facts, indent=1, ensure_ascii=True) + "\n")
+    if report:
+        R.write_report(out_dir, facts, records, detail)
     return facts
 
 
@@ -532,6 +558,7 @@ def main(argv=None, out=None):
                     help="seed for the shuffles (default %d)" % N.DEFAULT_SEED)
     ap.add_argument("--shuffle-scope", choices=N.SCOPES, default=N.SCOPE_DAY,
                     help="permute labels within each UTC day (default) or within each place and day")
+    ap.add_argument("--lead", help="token_id of the report's lead tree (default: see patient_zero/report.py)")
     args = ap.parse_args(argv)
     started_clock = time.perf_counter()
     started_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -545,7 +572,7 @@ def main(argv=None, out=None):
                      max_phrase_share=args.max_phrase_share, given_texts=given,
                      shuffles=args.shuffles, seed=args.seed, scope=args.shuffle_scope)
         params = {"adapter": args.adapter, "input": args.input, "min_agents": args.min_agents,
-                  "max_phrase_share": args.max_phrase_share, "given_texts": len(given)}
+                  "max_phrase_share": args.max_phrase_share, "given_texts": len(given), "lead": args.lead}
         facts = write_outputs(args.out, result, params, started_clock, started_utc)
     except (OSError, ValueError) as exc:
         print("patient-zero: ERROR: %s" % exc, file=out)
@@ -573,8 +600,10 @@ def main(argv=None, out=None):
         file=out)
     print("runtime: %.1f s (target under %d s)" % (facts["runtime"]["total_seconds"], TARGET_SECONDS),
           file=out)
-    print("wrote: %s and %s" % (os.path.join(args.out, "facts.json"),
-                                os.path.join(args.out, "trees.jsonl")), file=out)
+    print("wrote: %s" % ", ".join(os.path.join(args.out, n) for n in (
+        "facts.json", "trees.jsonl", "top_trees.json", "report.html")), file=out)
+    top = facts["outputs"]["top_trees.json"]
+    print("lead tree: %s (%s)" % (top["lead"], top["lead_rule"]), file=out)
     print("core_sha256: %s" % facts["core_sha256"], file=out)
     return 0
 

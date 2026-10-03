@@ -6,6 +6,7 @@ export folder. Failure messages carry counts only, never names or text.
 """
 
 import contextlib
+import html
 import io
 import json
 import os
@@ -22,6 +23,7 @@ if ROOT not in sys.path:
 from patient_zero import cascade as C  # noqa: E402
 from patient_zero import load as L  # noqa: E402
 from patient_zero import pipeline as P  # noqa: E402
+from patient_zero import report as R  # noqa: E402
 
 EXAMPLE = os.path.join(ROOT, "examples", "fake_log.ndjson")
 RECORD_FIELDS = (
@@ -78,7 +80,7 @@ class ExampleRun(unittest.TestCase):
         self.assertEqual(self.code_a, 0)
         self.assertEqual(self.code_b, 0)
         self.assertIn("core_sha256", self.text_a)
-        for name in ("facts.json", "trees.jsonl"):
+        for name in ("facts.json", "trees.jsonl", "top_trees.json", "report.html"):
             self.assertTrue(os.path.isfile(os.path.join(self.out_a, name)))
         self.assertFalse([n for n in os.listdir(self.out_a) if n.endswith(".tmp")])
 
@@ -292,6 +294,10 @@ class RealDataRun(unittest.TestCase):
             cls.facts = json.load(fh)
         with open(os.path.join(cls.tmp, "trees.jsonl"), encoding="utf-8") as fh:
             cls.records = [json.loads(line) for line in fh]
+        with open(os.path.join(cls.tmp, "top_trees.json"), encoding="utf-8") as fh:
+            cls.detail = json.load(fh)
+        with open(os.path.join(cls.tmp, "report.html"), encoding="utf-8") as fh:
+            cls.page = fh.read()
 
     @classmethod
     def tearDownClass(cls):
@@ -324,8 +330,23 @@ class RealDataRun(unittest.TestCase):
                 if rec[key] is not None:
                     named.add(rec[key])
         influence = set(row["agent"] for row in self.facts["scores"]["influence"]["top"])
+        detailed = set(nd["agent"] for tree in self.detail["trees"] for nd in tree["nodes"])
         self.assertEqual(len(humans & named), 0)
         self.assertEqual(len(humans & influence), 0)
+        self.assertEqual(len(humans & detailed), 0)
+        in_page = sum(1 for h in humans if ">%s<" % html.escape(h, quote=True) in self.page)
+        self.assertEqual(in_page, 0)
+
+    def test_report_lead_and_offline(self):
+        top = self.facts["outputs"]["top_trees.json"]
+        self.assertEqual(top["lead"], self.detail["lead"])
+        lead = next(t for t in self.detail["trees"] if t["token_id"] == top["lead"])
+        rec = next(r for r in self.records if r["token_id"] == top["lead"])
+        self.assertEqual(len(lead["nodes"]), rec["agents"])
+        if top["lead_rule"] == R.RULE_BEAT:
+            self.assertEqual(rec["shuffle_ge_observed"], 0)
+        low = self.page.lower()
+        self.assertEqual(sum(low.count(bad) for bad in ("<script", "http://", "https://", " src=")), 0)
 
     def test_strings_short(self):
         too_long = sum(1 for s in _strings(self.records) if len(s) > P.SHORT_MAX)

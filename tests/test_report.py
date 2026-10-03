@@ -1,0 +1,362 @@
+"""Tests for the report (patient_zero/report.py) and the figure check (tools/figcheck.py).
+
+Standard library unittest only. Everything runs on the synthetic example log
+or on made-up trees. The browser render runs only when PZ_FIGCHECK=1 (it
+starts a headless Chrome or Edge and takes about a minute). Failure messages
+carry counts only, never names or text from the data.
+"""
+
+import importlib.util
+import io
+import json
+import os
+import re
+import shutil
+import struct
+import sys
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+import zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from patient_zero import pipeline as P  # noqa: E402
+from patient_zero import report as R  # noqa: E402
+
+EXAMPLE = os.path.join(ROOT, "examples", "fake_log.ndjson")
+
+
+def _load_figcheck():
+    spec = importlib.util.spec_from_file_location("figcheck", os.path.join(ROOT, "tools", "figcheck.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+F = _load_figcheck()
+
+
+def run(main, args):
+    buf = io.StringIO()
+    return main(args, out=buf), buf.getvalue()
+
+
+def inline_svgs(page):
+    """Each inline <svg> of a page, parsed as XML (namespace added)."""
+    out = []
+    for chunk in re.findall(r"<svg\b.*?</svg>", page, flags=re.S):
+        out.append(ET.fromstring(chunk.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)))
+    return out
+
+
+def rec(tid, branch, links, mean=1.0, ge=0, agents=None):
+    return {"token_id": tid, "largest_branch": branch, "links_named": links, "shuffle_links_mean": mean,
+            "shuffle_ge_observed": ge, "agents": agents or branch}
+
+
+def node(n, t, family, status, parent=None, agent=None):
+    return {"n": n, "agent": agent or "agent-%d" % n, "t_min": float(t), "family": family, "group": "g",
+            "status": status, "parent": parent, "lag_min": None}
+
+
+def detail(nodes, branch_root=0, seed=0, token="host:secret.example", tid="abcdef012345"):
+    status = {s: sum(1 for nd in nodes if nd["status"] == s) for s in R.STATUS_NAMES}
+    links = sum(1 for nd in nodes if nd["parent"] is not None)
+    return {"token_id": tid, "token": token, "cls": "host", "kind": "host", "agents": len(nodes), "status": status,
+            "links_named": links, "links_unnamed": 0, "depth": 2, "largest_branch": 3, "uses": len(nodes),
+            "places": 2, "first_use": "2026-01-01T00:00:00Z", "span_hours": 1.0, "risky": [],
+            "seed_branch": 3, "seed_min_to_3rd": None, "seed_min_to_10th": None, "branch_min_to_3rd": None,
+            "branch_min_to_10th": None, "shuffle_links_mean": 1.5, "shuffle_ge_observed": 3,
+            "first": 0, "seed": seed, "branch_root": branch_root, "nodes": nodes}
+
+
+class ExampleReport(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="pz-report-")
+        cls.out = os.path.join(cls.tmp, "run")
+        cls.code, cls.text = run(P.main, ["--adapter", "generic", "--input", EXAMPLE, "--out", cls.out])
+        with open(os.path.join(cls.out, "report.html"), encoding="utf-8") as fh:
+            cls.page = fh.read()
+        cls.facts, cls.records, cls.detail = R.load_outputs(cls.out)
+        cls.svg_path = os.path.join(cls.tmp, "docs", "lead.svg")
+        cls.code_svg, cls.text_svg = run(R.main, ["--out", cls.out, "--svg", cls.svg_path])
+        with open(cls.svg_path, encoding="utf-8") as fh:
+            cls.svg = fh.read()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_files_and_facts(self):
+        self.assertEqual(self.code, 0, self.text)
+        self.assertEqual(self.code_svg, 0, self.text_svg)
+        for name in ("facts.json", "trees.jsonl", "top_trees.json", "report.html"):
+            self.assertTrue(os.path.isfile(os.path.join(self.out, name)))
+        self.assertEqual(self.facts["facts_version"], P.FACTS_VERSION)
+        top = self.facts["outputs"]["top_trees.json"]
+        self.assertEqual(top["trees"], len(self.detail["trees"]))
+        self.assertEqual(top["lead"], self.detail["lead"])
+        self.assertIn("lead tree: %s" % top["lead"], self.text)
+        self.assertIsNone(self.facts["params"]["lead"])
+
+    def test_page_is_offline(self):
+        low = self.page.lower()
+        for bad in ("<script", "http://", "https://", " src=", "<link", "url(", "@import"):
+            self.assertNotIn(bad, low)
+        self.assertTrue(self.page.startswith("<!doctype html>"))
+        self.assertGreaterEqual(len(inline_svgs(self.page)), 4)  # lead, speed, shuffle, status
+        for heading in ("Lead spread tree", "Spread speed", "Agent influence", "Observed against the shuffle",
+                        "Parallel starts", "Method and limits"):
+            self.assertIn(heading, self.page)
+
+    def test_no_human_label_and_no_row_text(self):
+        both = self.page + json.dumps(self.detail)
+        self.assertNotIn("Host", both)  # the example's human speaker
+        self.assertNotIn("Morning plan", both)
+        self.assertNotIn("reading list link is broken", both)
+
+    def test_detail_matches_records(self):
+        by_id = {r["token_id"]: r for r in self.records}
+        for tree in self.detail["trees"]:
+            r = by_id[tree["token_id"]]
+            self.assertEqual(len(tree["nodes"]), r["agents"])
+            self.assertEqual(sum(1 for nd in tree["nodes"] if nd["parent"] is not None), r["links_named"])
+            for nd in tree["nodes"]:
+                if nd["parent"] is not None:
+                    self.assertLess(nd["parent"], nd["n"])
+                    self.assertGreaterEqual(nd["t_min"], tree["nodes"][nd["parent"]]["t_min"])
+            self.assertEqual(tree["nodes"][0]["t_min"], 0.0)
+
+    def test_deterministic_and_rerender_matches(self):
+        again = R.render_report(self.facts, self.records, self.detail)
+        self.assertEqual(again, self.page)
+        self.assertEqual(R.public_svg(self.detail), self.svg)
+
+    def test_public_svg_has_no_labels_or_token_text(self):
+        root = ET.fromstring(self.svg.split("\n", 1)[1])
+        self.assertTrue(root.tag.endswith("svg"))
+        agents = set(nd["agent"] for t in self.detail["trees"] for nd in t["nodes"])
+        self.assertTrue(agents)
+        for agent in agents:
+            self.assertNotIn(agent, self.svg)
+        lead = next(t for t in self.detail["trees"] if t["token_id"] == self.detail["lead"])
+        self.assertNotIn(lead["token"].split(":")[-1], self.svg)
+        self.assertIn(lead["token_id"], self.svg)
+        self.assertNotIn("<title>", self.svg.split("</title>", 1)[1])  # no per-node tooltips
+
+    def test_public_svg_passes_source_checks(self):
+        checks = F.source_checks(F.parse_svg(self.svg_path))
+        for name in F.PLANNED:
+            self.assertTrue(checks[name]["pass"], name)
+
+    def test_report_lead_override(self):
+        other = [t["token_id"] for t in self.detail["trees"] if t["token_id"] != self.detail["lead"]]
+        self.assertTrue(other)
+        code, text = run(R.main, ["--out", self.out, "--lead", other[0]])
+        self.assertEqual(code, 0, text)
+        with open(os.path.join(self.out, "report.html"), encoding="utf-8") as fh:
+            page = fh.read()
+        self.assertIn(R.RULE_GIVEN, page)
+        self.assertIn(other[0], page)
+        code, text = run(R.main, ["--out", self.out, "--lead", "000000000000"])
+        self.assertEqual(code, 2)
+        self.assertIn("ERROR", text)
+        run(R.main, ["--out", self.out])  # restore the default page for other tests
+        with open(os.path.join(self.out, "report.html"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), self.page)
+
+    def test_cli_lead(self):
+        out = os.path.join(self.tmp, "lead-run")
+        last = R._linked(self.records)[-1]["token_id"]
+        code, text = run(P.main, ["--adapter", "generic", "--input", EXAMPLE, "--out", out, "--lead", last])
+        self.assertEqual(code, 0, text)
+        facts, _records, det = R.load_outputs(out)
+        self.assertEqual(det["lead"], last)
+        self.assertEqual(det["lead_rule"], R.RULE_GIVEN)
+        self.assertEqual(facts["params"]["lead"], last)
+        self.assertNotEqual(facts["core_sha256"], self.facts["core_sha256"])
+        code, text = run(P.main, ["--adapter", "generic", "--input", EXAMPLE, "--out", out, "--lead", "nope"])
+        self.assertEqual(code, 2)
+
+    def test_stale_outputs_refused(self):
+        copy = os.path.join(self.tmp, "stale")
+        shutil.copytree(self.out, copy)
+        with open(os.path.join(copy, "trees.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write("\n")
+        with self.assertRaises(ValueError):
+            R.load_outputs(copy)
+        code, text = run(R.main, ["--out", copy])
+        self.assertEqual(code, 2)
+
+    def test_svg_flag_must_be_svg(self):
+        code, text = run(R.main, ["--out", self.out, "--svg", os.path.join(self.tmp, "lead.png")])
+        self.assertEqual(code, 2)
+
+
+class Picking(unittest.TestCase):
+    def test_lead_prefers_trees_that_beat_every_shuffle(self):
+        records = [rec("aaa", 10, 20, ge=40), rec("bbb", 5, 6, ge=0), rec("ccc", 5, 8, ge=0), rec("ddd", 0, 0)]
+        self.assertEqual(R.pick_lead(records), ("ccc", R.RULE_BEAT))  # ties on branch go to more links
+        self.assertEqual(R.pick_scale(records), "aaa")
+        self.assertEqual(R.pick_lead(records, "aaa"), ("aaa", R.RULE_GIVEN))
+        with self.assertRaises(ValueError):
+            R.pick_lead(records, "zzz")
+
+    def test_lead_falls_back_without_a_shuffle(self):
+        records = [rec("aaa", 3, 2, mean=None, ge=None), rec("bbb", 4, 3, mean=None, ge=None)]
+        self.assertEqual(R.pick_lead(records), ("bbb", R.RULE_LARGEST))
+        self.assertEqual(R.pick_lead([rec("x", 1, 0)]), (None, R.RULE_NONE))
+        self.assertIsNone(R.pick_scale([]))
+
+    def test_detail_ids(self):
+        records = [rec("t%02d" % k, 50 - k, 60 - k, ge=(0 if k % 2 else 5)) for k in range(40)]
+        ids = R.detail_ids(records, "t39")
+        self.assertEqual(ids[:2], ["t39", "t00"])
+        self.assertEqual(len(ids), len(set(ids)))
+        beaters = [r["token_id"] for r in R._linked(records) if R.beats_every_shuffle(r)]
+        for tid in beaters[:R.DETAIL_TOP]:
+            self.assertIn(tid, ids)
+
+
+class Drawing(unittest.TestCase):
+    def test_tree_svg_all_statuses_and_other_families(self):
+        nodes = [node(0, 0, "fa", "first"), node(1, 5, "fb", "linked", 0), node(2, 9, "fc", "linked", 1),
+                 node(3, 12, "fd", "parallel"), node(4, 20, "fe", "unnamed"), node(5, 30, "fa", "clock_dropped"),
+                 node(6, 31, "fa", "linked", 3)]
+        d = detail(nodes, branch_root=0)
+        svg = R.svg_tree(d, 100, public=True)
+        root = ET.fromstring(svg.split("\n", 1)[1])
+        marks = [el for el in root.iter() if (el.get("class") or "") == "node"]
+        self.assertEqual(len(marks), len(nodes))
+        self.assertIn("2 other page families", svg)
+        self.assertNotIn("secret.example", svg)
+        self.assertNotIn("agent-1", svg)
+        self.assertIn("parallel start", svg)
+        self.assertIn("dropped by the clock rule", svg)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "t.svg")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(svg)
+            checks = F.source_checks(F.parse_svg(path))
+        self.assertTrue(all(checks[name]["pass"] for name in F.PLANNED))
+        private = R.svg_tree(d, 100, public=False, standalone=False)
+        self.assertIn("secret.example", private)
+        self.assertIn("agent-1", private)
+
+    def test_big_tree_draws_the_largest_branch(self):
+        nodes = [node(0, 0, "fa", "first")]
+        nodes += [node(k, k, "fa", "parallel") for k in range(1, 100)]  # lone parallel starts
+        nodes += [node(100, 100, "fb", "parallel")]
+        nodes += [node(100 + k, 100 + k, "fb", "linked", 100 + k - 1) for k in range(1, 120)]
+        d = detail(nodes, branch_root=100)
+        picked, mode = R.drawn_nodes(d)
+        self.assertEqual(mode, "branch")
+        self.assertEqual(picked, list(range(100, 220)))
+        svg = R.svg_tree(d, 0, public=True)
+        self.assertIn("the largest branch, 120 of 220 adopters", svg)
+        self.assertIn("no label shuffle", svg)
+
+    def test_time_axis(self):
+        scale, ticks, label = R.time_axis([0, 10, 20, 45])
+        self.assertIn("minutes", label)
+        self.assertAlmostEqual(scale(ticks[-1][0]), 1.0)
+        self.assertGreaterEqual(ticks[-1][0], 45)
+        scale, ticks, label = R.time_axis([0, 1, 2, 3, 4, 5000])
+        self.assertIn("log scale", label)
+        self.assertEqual(scale(0), 0.0)
+        self.assertLessEqual(scale(5000), 1.0)
+        scale, ticks, label = R.time_axis([0, 300, 600, 900])
+        self.assertIn("hours", label)
+        self.assertEqual(R.time_axis([])[1][0], (0, "0"))
+
+    def test_colours_follow_use_count(self):
+        d = detail([node(0, 0, "b", "first"), node(1, 1, "a", "linked", 0), node(2, 2, "a", "linked", 1)])
+        colour, legend = R.tree_colours(d, [0, 1, 2])
+        self.assertEqual(colour["a"], R.SERIES[0])
+        self.assertEqual(colour["b"], R.SERIES[1])
+        self.assertEqual(len(legend), 2)
+
+
+class FigcheckParts(unittest.TestCase):
+    @staticmethod
+    def png(width, rows, colour_type=2, filters=None):
+        bpp = 3 if colour_type == 2 else 4
+        raw = b""
+        prev = bytes(width * bpp)
+        for y, row in enumerate(rows):
+            f = (filters or [0] * len(rows))[y]
+            line = bytes(row)
+            if f == 2:  # up
+                line = bytes((line[x] - prev[x]) & 255 for x in range(len(line)))
+            elif f == 1:  # sub
+                line = bytes((line[x] - (line[x - bpp] if x >= bpp else 0)) & 255 for x in range(len(line)))
+            raw += bytes([f]) + line
+            prev = bytes(row)
+
+        def chunk(kind, body):
+            return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+        head = struct.pack(">IIBBBBB", width, len(rows), 8, colour_type, 0, 0, 0)
+        return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+    def test_read_png_filters(self):
+        rows = [[10, 20, 30, 40, 50, 60], [70, 80, 90, 1, 2, 3], [255, 0, 128, 7, 8, 9]]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "x.png")
+            with open(path, "wb") as fh:
+                fh.write(self.png(2, rows, filters=[0, 2, 1]))
+            img = F.read_png(path)
+        self.assertEqual(img[:3], (2, 3, 3))
+        self.assertEqual(F.pixel(img, 1, 1), (1, 2, 3))
+        self.assertEqual(F.pixel(img, 0, 2), (255, 0, 128))
+
+    def test_text_box_and_hide_text(self):
+        el = ET.fromstring('<text x="30" y="200" font-size="10" text-anchor="middle" '
+                           'transform="rotate(-90 30 200)">abcdefghij</text>')
+        x0, y0, x1, y1 = F.text_box(el)
+        self.assertLess(x1 - x0, y1 - y0)  # rotated: taller than wide
+        self.assertTrue(y0 < 200 < y1)
+        hidden = F.hide_text('<svg width="1"><text>a</text></svg>')
+        self.assertIn("<style>text{visibility:hidden}</style>", hidden)
+
+    def test_source_checks_catch_a_missing_swatch(self):
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><title>t</title>'
+               '<text id="a-title" x="1" y="10">T</text><text id="a-x-label" x="1" y="90">x</text>'
+               '<text id="a-y-label" x="5" y="50">y</text>'
+               '<rect class="legend-swatch" x="1" y="20" width="12" height="12" fill="#2a78d6"/>'
+               '<circle class="node" cx="50" cy="50" r="4" fill="#2a78d6"/>'
+               '<circle class="node" cx="60" cy="50" r="4" fill="#fcfcfb" stroke="#eb6834"/></svg>')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "s.svg")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(svg)
+            checks = F.source_checks(F.parse_svg(path))
+        self.assertTrue(checks["title_present"]["pass"])
+        self.assertTrue(checks["axis_labels_present"]["pass"])
+        self.assertFalse(checks["legend_colours_match"]["pass"])
+        self.assertEqual(checks["legend_colours_match"]["mark_colours"], ["#2a78d6", "#eb6834"])
+
+
+@unittest.skipUnless(os.environ.get("PZ_FIGCHECK") == "1", "set PZ_FIGCHECK=1 to render with a headless browser")
+class FigcheckRender(unittest.TestCase):
+    def test_render_passes_on_the_example_figure(self):
+        tmp = tempfile.mkdtemp(prefix="pz-figcheck-test-")
+        try:
+            out = os.path.join(tmp, "run")
+            self.assertEqual(run(P.main, ["--adapter", "generic", "--input", EXAMPLE, "--out", out])[0], 0)
+            svg = os.path.join(tmp, "lead.svg")
+            self.assertEqual(run(R.main, ["--out", out, "--svg", svg])[0], 0)
+            code, text = run(F.main, ["--svg", svg, "--out-dir", tmp])
+            self.assertEqual(code, 0, text)
+            with open(os.path.join(tmp, "lead-checks.json"), encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["status"], "PASS")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    unittest.main()
