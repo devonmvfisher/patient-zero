@@ -200,8 +200,12 @@ class WikiFixture(unittest.TestCase):
     def test_missing_files(self):
         tmp = tempfile.mkdtemp(prefix="pz-load-empty-")
         try:
-            with self.assertRaises(FileNotFoundError):
+            with self.assertRaises(FileNotFoundError) as ctx:
                 L.load_wiki(tmp)
+            message = str(ctx.exception)  # plain words and a next step, not a bare path
+            self.assertIn("revisions.jsonl.gz", message)
+            self.assertIn("export folder", message)
+            self.assertIn("README.md", message)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

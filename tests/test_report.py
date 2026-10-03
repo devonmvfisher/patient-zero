@@ -134,7 +134,20 @@ class ExampleReport(unittest.TestCase):
     def test_deterministic_and_rerender_matches(self):
         again = R.render_report(self.facts, self.records, self.detail)
         self.assertEqual(again, self.page)
-        self.assertEqual(R.public_svg(self.detail), self.svg)
+        self.assertEqual(R.public_svg(self.detail, facts=self.facts), self.svg)
+
+    def test_verdict_on_top_and_in_the_cli(self):
+        word, sentence = R.chance_verdict(self.facts["slots"]["F5"])
+        self.assertIn(word, ("above chance", "below chance", "within chance"))
+        self.assertIn('<p class="verdict">', self.page)
+        self.assertLess(self.page.index('class="verdict"'), self.page.index("Lead spread tree</h2>"))
+        self.assertIn("against the shuffle: %s" % word, self.text)
+        self.assertNotIn("None min", self.text)
+
+    def test_public_svg_says_how_the_tree_was_picked(self):
+        for line in R.selection_lines(self.detail["lead_rule"], self.facts):
+            self.assertIn(R._e(line), self.svg)
+        self.assertTrue(R.selection_lines(self.detail["lead_rule"], self.facts))
 
     def test_public_svg_has_no_labels_or_token_text(self):
         root = ET.fromstring(self.svg.split("\n", 1)[1])
@@ -339,6 +352,57 @@ class FigcheckParts(unittest.TestCase):
         self.assertTrue(checks["axis_labels_present"]["pass"])
         self.assertFalse(checks["legend_colours_match"]["pass"])
         self.assertEqual(checks["legend_colours_match"]["mark_colours"], ["#2a78d6", "#eb6834"])
+
+
+def f5(observed, mean, p05, p95, ge, shuffles=100, share=(0.4, 0.5)):
+    return {"links_observed": observed, "links_expected_mean": mean, "links_expected_p05": p05,
+            "links_expected_p95": p95, "shuffles_ge_observed": ge, "shuffles": shuffles, "scope": "day",
+            "linked_share_observed": share[0], "linked_share_expected_mean": share[1]}
+
+
+class Verdict(unittest.TestCase):
+    """The plain-words comparison with the shuffle, on made-up numbers."""
+
+    def test_below_above_within(self):
+        word, text = R.chance_verdict(f5(28250, 45188.7, 44684.2, 45632.2, 100))
+        self.assertEqual(word, "below chance")
+        self.assertIn("100 of 100 shuffles", text)
+        self.assertIn("not evidence of spread beyond chance", text)
+        self.assertIn("within each UTC day", text)
+        word, text = R.chance_verdict(f5(80, 40.0, 35.0, 46.0, 0))
+        self.assertEqual(word, "above chance")
+        self.assertIn("hand-check", text)
+        word, text = R.chance_verdict(f5(7, 5.5, 4.0, 7.0, 14))
+        self.assertEqual(word, "within chance")  # on the 95th percentile is still inside
+        self.assertIn("not evidence of spread beyond chance", text)
+
+    def test_no_shuffle(self):
+        self.assertEqual(R.chance_verdict({}), (None, None))
+        self.assertEqual(R.chance_verdict(f5(1, 1.0, 1.0, 1.0, 0, shuffles=0)), (None, None))
+
+    def test_share_line_is_optional(self):
+        word, text = R.chance_verdict(f5(7, 5.5, 4.0, 7.0, 14, share=(None, None)))
+        self.assertNotIn("Share of later adopters", text)
+
+    def test_selection_lines(self):
+        facts = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 42,
+                               "chance_beats_upper_bound": 75.95, "tokens": 7671}}
+        lines = R.selection_lines(R.RULE_BEAT, facts)
+        self.assertIn("largest of 42 trees that beat every shuffle", lines[0])
+        self.assertIn("up to 76 such trees among 7,671", lines[0])
+        self.assertIn("not proof", lines[1])
+        small = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 1,
+                               "chance_beats_upper_bound": 0.0297, "tokens": 3}}
+        self.assertIn("up to 0.0 such trees", R.selection_lines(R.RULE_BEAT, small)[0])
+        self.assertIn("no tree beat every shuffle", R.selection_lines(R.RULE_LARGEST, None)[0])
+        self.assertEqual(R.selection_lines(R.RULE_GIVEN, None), ["Picked by hand (--lead)."])
+        self.assertEqual(R.selection_lines(R.RULE_NONE, None), [])
+
+    def test_note_lines_sit_in_the_public_figure(self):
+        d = detail([node(0, 0, "a", "first"), node(1, 5, "a", "linked", 0), node(2, 9, "a", "linked", 1)])
+        svg = R.svg_tree(d, 100, public=True, note_lines=["Picked by hand (--lead)."])
+        self.assertIn("Picked by hand (--lead).", svg)
+        ET.fromstring(svg.split("\n", 1)[1] if svg.startswith("<?xml") else svg)
 
 
 @unittest.skipUnless(os.environ.get("PZ_FIGCHECK") == "1", "set PZ_FIGCHECK=1 to render with a headless browser")

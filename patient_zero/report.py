@@ -4,7 +4,8 @@ Python standard library only. Two outputs:
 
 ``report.html`` (in the run's output folder)
     One static page: inline SVG and inline CSS, no scripts, no external
-    files, so it opens offline. Sections: key numbers; the lead spread tree
+    files, so it opens offline. Sections: key numbers; the verdict against
+    the label shuffle in plain words (``chance_verdict``); the lead spread tree
     (time left to right, coloured by page family, with a legend); the largest
     tree for scale; spread speed; the agent influence table; observed against
     the label shuffle; parallel starts; page-family flow; wikis; risky-word
@@ -16,7 +17,10 @@ Python standard library only. Two outputs:
 ``lead.svg`` (only with ``--svg``, normally ``docs/lead.svg``)
     The lead tree alone, summary data only: no agent labels and no token text
     (the token is named by its class and token_id), page families, and minutes
-    since the first use. Meant to be committed and shown in the README.
+    since the first use, plus a line saying how the tree was picked and how
+    many trees chance alone would let through (``selection_lines``), so the
+    figure stays honest when shown on its own. Meant to be committed and shown
+    in the README.
 
 Both are built from three files a run writes to its output folder:
 facts.json, trees.jsonl and top_trees.json. top_trees.json holds node-level
@@ -389,10 +393,13 @@ def tree_colours(detail, picked):
     return colour, legend
 
 
-def svg_tree(detail, shuffles, public=True, prefix="lead-", heading="Lead spread tree", standalone=True):
+def svg_tree(detail, shuffles, public=True, prefix="lead-", heading="Lead spread tree", standalone=True,
+             note_lines=()):
     """One spread tree, time left to right, one row per agent, coloured by page family.
 
     ``public`` leaves out agent labels (no tooltips) and the token text.
+    ``note_lines`` (from ``selection_lines``) go under the subtitle, so a copy
+    of the figure on its own still says how the tree was picked.
     """
     nodes = detail["nodes"]
     picked, mode = drawn_nodes(detail)
@@ -425,6 +432,7 @@ def svg_tree(detail, shuffles, public=True, prefix="lead-", heading="Lead spread
                         detail["shuffle_ge_observed"], shuffles, _num(detail["links_named"])))
     else:
         lines.append("Named links %s; no label shuffle in this run" % _num(detail["links_named"]))
+    lines.extend(note_lines)
     if not public:
         lines.append("token: %s" % detail["token"])
     y = 54
@@ -730,6 +738,8 @@ summary { cursor: pointer; color: %(ink2)s; font-size: 13px; }
 ul { margin: 6px 0; padding-left: 20px; }
 li { margin: 3px 0; max-width: 80ch; }
 footer { color: %(ink2)s; font-size: 12.5px; margin-top: 24px; }
+.verdict { max-width: none; margin: 14px 0 0; padding: 10px 14px; background: %(surface)s;
+           border: 1px solid rgba(11,11,11,0.10); border-left: 4px solid %(ink2)s; border-radius: 8px; }
 """ % {"page": PAGE, "ink": INK, "ink2": INK2, "font": FONT, "surface": SURFACE, "grid": GRID}
 
 
@@ -793,6 +803,66 @@ def _lead_text(rule, facts):
     return text
 
 
+SCOPE_WORDS = {"day": "within each UTC day", "place_day": "within each place and UTC day"}
+
+
+def chance_verdict(f5):
+    """(word, sentences): observed named links against the label shuffle, in plain words.
+
+    The report prints "Against the label shuffle: <word>." in bold, then the
+    sentences. ``f5`` is facts["slots"]["F5"]. The word is "above chance" when the
+    observed count is over the shuffle's 95th percentile, "below chance" when
+    it is under the 5th, and "within chance" otherwise. Returns (None, None)
+    when the run had no shuffle.
+    """
+    if not f5 or not f5.get("shuffles"):
+        return None, None
+    obs, mean = f5["links_observed"], f5["links_expected_mean"]
+    lo, hi = f5["links_expected_p05"], f5["links_expected_p95"]
+    if obs > hi:
+        word = "above chance"
+    elif obs < lo:
+        word = "below chance"
+    else:
+        word = "within chance"
+    scope = SCOPE_WORDS.get(f5.get("scope"), "within each shuffle group")
+    text = ("Named links: %s observed against a shuffle mean of %s (5th to 95th percentile %s to %s); "
+            "%d of %d shuffles reached the observed count."
+            % (_num(obs), _num(mean), _num(lo), _num(hi), f5["shuffles_ge_observed"], f5["shuffles"]))
+    if f5.get("linked_share_observed") is not None and f5.get("linked_share_expected_mean") is not None:
+        text += (" Share of later adopters linked to a named earlier user (this allows for the shuffle making "
+                 "more adopters): %s observed, %s under the shuffle."
+                 % (_num(f5["linked_share_observed"], 3), _num(f5["linked_share_expected_mean"], 3)))
+    if word == "below chance":
+        text += (" Fewer adoptions follow a visit to an earlier user's page than when agent labels are shuffled "
+                 "%s, so these links are not evidence of spread beyond chance." % scope)
+    elif word == "within chance":
+        text += (" About as many adoptions follow a visit to an earlier user's page as when agent labels are "
+                 "shuffled %s, so these links are not evidence of spread beyond chance." % scope)
+    else:
+        text += (" More adoptions follow a visit to an earlier user's page than when agent labels are shuffled "
+                 "%s. Each link is still a candidate: hand-check a sample before calling it spread." % scope)
+    return word, text
+
+
+def selection_lines(rule, facts):
+    """One or two short lines saying how the drawn tree was picked, for inside the figure itself."""
+    nm = (facts or {}).get("nullmodel") or {}
+    if rule == RULE_BEAT and nm.get("shuffles"):
+        bound = nm["chance_beats_upper_bound"]
+        return ["Picked as the largest of %s trees that beat every shuffle; chance alone allows up to %s such "
+                "trees among %s." % (_num(nm["trees_beating_every_shuffle"]),
+                                     _num(int(round(bound))) if bound >= 10 else _num(bound), _num(nm["tokens"])),
+                "So it shows how the method draws a spread; it is not proof that spread beat chance."]
+    if rule == RULE_BEAT:
+        return ["Picked as the largest tree that beat every shuffle."]
+    if rule == RULE_LARGEST:
+        return ["Picked as the largest branch among trees with named links; no tree beat every shuffle."]
+    if rule == RULE_GIVEN:
+        return ["Picked by hand (--lead)."]
+    return []
+
+
 def render_report(facts, records, detail, lead=None):
     """The report.html text. ``lead`` (a token_id in ``detail``) overrides the stored lead tree."""
     lead_id = lead or detail["lead"]
@@ -831,6 +901,13 @@ def render_report(facts, records, detail, lead=None):
          if f5.get("ratio_observed_to_expected") is not None else "n/a"),
         ("parallel starts", _num(s["F8"]["parallel_starts"])),
     ]))
+    word, verdict = chance_verdict(f5)
+    if verdict is None:
+        out.append('<p class="verdict">No label shuffle in this run (--shuffles 0), so there is no chance '
+                   "baseline: the links below are not compared with anything.</p>")
+    else:
+        out.append('<p class="verdict"><strong>Against the label shuffle: %s.</strong> %s</p>'
+                   % (_e(word), _e(verdict)))
 
     out.append("<section><h2>Lead spread tree</h2>")
     if lead_tree is None:
@@ -838,7 +915,7 @@ def render_report(facts, records, detail, lead=None):
     else:
         out.append("<p>%s</p>" % _e(_lead_text(rule, facts)))
         out.append("<figure>%s</figure>" % svg_tree(lead_tree, shuffles, public=False, prefix="lead-",
-                                                      standalone=False))
+                                                      standalone=False, note_lines=selection_lines(rule, facts)))
         node_rows = []
         for nd in lead_tree["nodes"]:
             parent = nd["parent"]
@@ -1023,14 +1100,20 @@ def write_report(out_dir, facts, records, detail, lead=None):
     return path
 
 
-def public_svg(detail, lead=None):
-    """The lead tree as a standalone SVG: summary data only (no agent labels, no token text)."""
+def public_svg(detail, lead=None, facts=None):
+    """The lead tree as a standalone SVG: summary data only (no agent labels, no token text).
+
+    With ``facts`` the figure also says how the tree was picked and how many
+    trees chance alone would let through (``selection_lines``).
+    """
     tid = lead or detail["lead"]
     tree = _find(detail, tid)
     if tree is None:
         raise ValueError("no lead tree to draw" if tid is None else
                          "tree %s is not in top_trees.json" % short(tid, 20))
-    return svg_tree(tree, detail["shuffles"], public=True, prefix="lead-", standalone=True)
+    rule = RULE_GIVEN if lead else detail["lead_rule"]
+    return svg_tree(tree, detail["shuffles"], public=True, prefix="lead-", standalone=True,
+                    note_lines=selection_lines(rule, facts))
 
 
 def load_outputs(out_dir):
@@ -1068,7 +1151,7 @@ def main(argv=None, out=None):
                 raise ValueError("--svg must name a .svg file")
             folder = os.path.dirname(os.path.abspath(args.svg))
             os.makedirs(folder, exist_ok=True)
-            _write_atomic(args.svg, public_svg(detail, lead=args.lead))
+            _write_atomic(args.svg, public_svg(detail, lead=args.lead, facts=facts))
             print("wrote: %s" % args.svg, file=out)
     except (OSError, ValueError) as exc:
         print("patient-zero report: ERROR: %s" % exc, file=out)

@@ -542,13 +542,18 @@ def main(argv=None, out=None):
     out = out or sys.stdout
     ap = argparse.ArgumentParser(
         prog="cli.py",
-        description="Run patient-zero end to end and write facts.json and trees.jsonl "
-                    "(counts and summary fields only; no row text).")
-    ap.add_argument("--adapter", choices=sorted(ADAPTERS), required=True)
+        description="Run patient-zero end to end and write facts.json, trees.jsonl, top_trees.json and "
+                    "report.html (counts and summary fields only; no row text).")
+    ap.add_argument("--adapter", choices=sorted(ADAPTERS), required=True,
+                    help="wiki: the collusion.wiki export folder; generic: one JSON Lines log "
+                         "(see examples/fake_log.ndjson)")
     ap.add_argument("--input", required=True, help="export folder (wiki) or JSON Lines file (generic)")
-    ap.add_argument("--out", required=True, help="output folder, outside the repo")
-    ap.add_argument("--min-agents", type=int, default=MIN_AGENTS)
-    ap.add_argument("--max-phrase-share", type=float, default=MAX_PHRASE_SHARE)
+    ap.add_argument("--out", required=True, help="output folder: outside the repo, or the repo's git-ignored out/")
+    ap.add_argument("--min-agents", type=int, default=MIN_AGENTS,
+                    help="keep tokens used by at least this many agents (default %d)" % MIN_AGENTS)
+    ap.add_argument("--max-phrase-share", type=float, default=MAX_PHRASE_SHARE,
+                    help="drop 3-word phrases found in more than this share of agent rows, as templates "
+                         "(default %s; see patient_zero/tokens.py)" % MAX_PHRASE_SHARE)
     ap.add_argument("--given", action="append", default=[],
                     help="a shared goal or prompt text file; its tokens are dropped (repeatable)")
     ap.add_argument("--shuffles", type=int, default=N.DEFAULT_SHUFFLES,
@@ -594,10 +599,19 @@ def main(argv=None, out=None):
                   f5["scope"], f5["shuffles"], f5["seed"], f5["links_expected_mean"],
                   f5["links_expected_sd"], f5["ratio_observed_to_expected"], f5["shuffles_ge_observed"]),
               file=out)
+        word, _sentence = R.chance_verdict(f5)
+        print("against the shuffle: %s (observed %s the shuffle's 5th to 95th percentile, %.1f to %.1f)" % (
+            word, {"above chance": "over", "below chance": "under"}.get(word, "inside"),
+            f5["links_expected_p05"], f5["links_expected_p95"]), file=out)
+    else:
+        print("against the shuffle: no shuffle in this run, so no chance baseline", file=out)
     f7 = s["F7"]
-    print("speed: %d trees reach a 10th agent in the seed's branch; fastest %s min, median %s min" % (
-        f7["trees_reaching_10_in_seed_branch"], f7["fastest_minutes_to_10th"], f7["median_minutes_to_10th"]),
-        file=out)
+    if f7["trees_reaching_10_in_seed_branch"]:
+        print("speed: %d trees reach a 10th agent in the seed's branch; fastest %s min, median %s min" % (
+            f7["trees_reaching_10_in_seed_branch"], f7["fastest_minutes_to_10th"], f7["median_minutes_to_10th"]),
+            file=out)
+    else:
+        print("speed: no tree reaches a 10th agent in the seed's branch", file=out)
     print("runtime: %.1f s (target under %d s)" % (facts["runtime"]["total_seconds"], TARGET_SECONDS),
           file=out)
     print("wrote: %s" % ", ".join(os.path.join(args.out, n) for n in (

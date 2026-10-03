@@ -246,7 +246,10 @@ def load_wiki(data_dir):
     label_path = os.path.join(data_dir, "labels.jsonl.gz")
     for path in (rev_path, page_path):
         if not os.path.isfile(path):
-            raise FileNotFoundError(path)
+            raise FileNotFoundError(
+                "%s not found. --input must be the unpacked collusion.wiki export folder holding "
+                "revisions.jsonl.gz and pages.jsonl.gz (labels.jsonl.gz too, for agent names); "
+                "README.md, section Data, says where to get it." % path)
 
     families = {}
     for _n, p in _read_json_lines(page_path, _PAGE_KEYS):
