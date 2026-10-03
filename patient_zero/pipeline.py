@@ -1,6 +1,8 @@
-"""Run patient-zero end to end: load, find tokens, build spread trees, write outputs.
+"""Run patient-zero end to end: load, find tokens, build spread trees, check them
+against a label shuffle, score them, write outputs.
 
-Python standard library only, deterministic (no randomness in this stage).
+Python standard library only, deterministic: the only randomness is the label
+shuffle (``patient_zero.nullmodel``), driven by one fixed seed.
 One command does the whole run::
 
     python cli.py --adapter wiki --input PATH/TO/collusion --out PATH/TO/out
@@ -10,11 +12,15 @@ One command does the whole run::
 folder. Two files are written there:
 
 ``facts.json``
-    Counts only: input file names, sizes and SHA-256 hashes; parameters;
-    loader counts; token counts per class; spread-tree counts; page-family and
-    group (wiki) tables; risky-word types; the fact-sheet slots this stage can
-    fill; run times. ``core_sha256`` hashes every section that should not
-    change between two runs on the same input (not times, not the code state).
+    Counts: input file names, sizes and SHA-256 hashes; parameters; loader
+    counts; token counts per class; spread-tree counts; page-family and group
+    (wiki) tables; risky-word types, against the shuffle; the shuffle baseline
+    (``nullmodel``); scores (influence, speed, page-family flow); the
+    fact-sheet slots this stage can fill; run times. The influence table names
+    the top agents by label (escaped, at most 80 characters), like
+    trees.jsonl. ``core_sha256`` hashes every section that should not change
+    between two runs on the same input and seed (not times, not the code
+    state).
 
 ``trees.jsonl``
     One line per spread tree, biggest first, summary fields only:
@@ -25,7 +31,11 @@ folder. Two files are written there:
     * page families and groups by use count;
     * first user and effective seed (agent labels, escaped, at most 80
       characters) with the time, family and group of their first use;
-    * risky-word types (type names only).
+    * risky-word types (type names only);
+    * speed: minutes from the effective seed (and from the largest branch's
+      root) to the 3rd and 10th agent linked below it;
+    * the shuffle: mean named links under the shuffle and how many shuffles
+      reached the observed count.
 
     No row text, no page names. Blank and human rows have no label after
     loading, so their labels can never appear.
@@ -48,21 +58,21 @@ import sys
 import time
 from collections import Counter, defaultdict
 from statistics import median
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
+from patient_zero import nullmodel as N
+from patient_zero import score as S
 from patient_zero.cascade import STATUSES, build_trees
 from patient_zero.load import ADAPTERS, iso_utc, load
-from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, RISKY_TYPES, find_tokens
+from patient_zero.safe import NO_FAMILY, SHORT_MAX, short, token_id  # noqa: F401 (re-exported)
+from patient_zero.score import NARROW_RISKY, branch_sizes  # noqa: F401 (re-exported)
+from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
 
-FACTS_VERSION = 1
-SHORT_MAX = 80
+FACTS_VERSION = 2
 TARGET_SECONDS = 300
-NO_FAMILY = "(none)"
 WIKI_FILES = ("revisions.jsonl.gz", "pages.jsonl.gz", "labels.jsonl.gz")
-# Risky types that name a mechanism; "answer", "share" and "relay" are broad words.
-NARROW_RISKY = ("bypass", "workaround", "blocked", "captcha", "rate_limit", "proxy", "cors")
 CORE_KEYS = ("input", "params", "load", "tokens", "cascade", "trees", "families", "groups",
-             "risky", "outputs")
+             "risky", "outputs", "nullmodel", "scores")
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -76,40 +86,10 @@ class Result(NamedTuple):
     trees: dict
     tree_stats: dict
     seconds: dict  # stage -> seconds
+    null: Optional[N.NullResult] = None  # the label-shuffle baseline
 
 
 # ---------------------------------------------------------------- small helpers
-
-
-def short(value, limit=SHORT_MAX):
-    """Escape a data string (non-printable-ASCII and backslashes) and cut it to ``limit``."""
-    if value is None:
-        return None
-    pieces = []
-    for ch in str(value):
-        code = ord(ch)
-        if ch == "\\":
-            pieces.append("\\\\")
-        elif 32 <= code < 127:
-            pieces.append(ch)
-        elif code < 0x10000:
-            pieces.append("\\u%04x" % code)
-        else:
-            pieces.append("\\U%08x" % code)
-    if sum(len(p) for p in pieces) <= limit:
-        return "".join(pieces)
-    kept, size = [], 0
-    for piece in pieces:  # never cut inside an escape
-        if size + len(piece) > limit - 3:
-            break
-        kept.append(piece)
-        size += len(piece)
-    return "".join(kept) + "..."
-
-
-def token_id(key):
-    """Stable 12-hex handle for a token key."""
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
 
 
 def _sha256_file(path):
@@ -206,8 +186,8 @@ def _write_atomic(path, text):
 
 
 def run(adapter, input_path, min_agents=MIN_AGENTS, max_phrase_share=MAX_PHRASE_SHARE,
-        given_texts=()):
-    """Load, find tokens and build spread trees. Returns a Result (in memory)."""
+        given_texts=(), shuffles=N.DEFAULT_SHUFFLES, seed=N.DEFAULT_SEED, scope=N.SCOPE_DAY):
+    """Load, find tokens, build spread trees, run the shuffle. Returns a Result (in memory)."""
     seconds = {}
     t0 = time.perf_counter()
     rows, load_stats = load(adapter, input_path)
@@ -219,26 +199,24 @@ def run(adapter, input_path, min_agents=MIN_AGENTS, max_phrase_share=MAX_PHRASE_
     t0 = time.perf_counter()
     trees, tree_stats = build_trees(rows, tokens)
     seconds["cascade"] = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    null = N.run(rows, tokens, shuffles=shuffles, seed=seed, scope=scope)
+    seconds["nullmodel"] = time.perf_counter() - t0
     token_stats = {k: v for k, v in token_stats.items() if k != "seconds"}
     tree_stats = {k: v for k, v in tree_stats.items() if k != "seconds"}
-    return Result(rows, load_stats, tokens, token_stats, trees, tree_stats, seconds)
-
-
-def branch_sizes(tree):
-    """Root agent -> agents in its branch (the root plus everyone linked below it)."""
-    size = {a.agent: 1 for a in tree.adoptions}
-    for a in reversed(tree.adoptions):  # parents come earlier in first-use order
-        if a.parent is not None:
-            size[a.parent] += size[a.agent]
-    return {a.agent: size[a.agent] for a in tree.adoptions if a.parent is None}
+    return Result(rows, load_stats, tokens, token_stats, trees, tree_stats, seconds, null)
 
 
 def _top(counter, n):
     return sorted(counter.items(), key=lambda kv: (-kv[1], str(kv[0])))[:n]
 
 
-def tree_record(tree, token, rows):
-    """Summary fields of one spread tree (see the module docstring)."""
+def tree_record(tree, token, rows, shuffle=(None, None)):
+    """Summary fields of one spread tree (see the module docstring).
+
+    ``shuffle`` is (mean named links under the shuffle, shuffles reaching the
+    observed count) from ``nullmodel.per_token``.
+    """
     use_rows = token.rows
     families = Counter(rows[i].family or NO_FAMILY for i in use_rows)
     groups = Counter(rows[i].group or NO_FAMILY for i in use_rows)
@@ -251,6 +229,7 @@ def tree_record(tree, token, rows):
             big_root, big_size = root, size
     first = tree.adoptions[0]
     seed = next((a for a in tree.adoptions if a.agent == tree.effective_seed), None)
+    speed = S.tree_speed(tree, big_root)
     return {
         "token_id": token_id(tree.token),
         "token": short(tree.token),
@@ -281,15 +260,24 @@ def tree_record(tree, token, rows):
         "span_hours": round((tree.adoptions[-1].time - first.time) / 3600.0, 2),
         "named_lag_median_s": round(median(link.lag for link in named), 1) if named else None,
         "risky": list(token.risky),
+        "seed_branch": speed["seed_branch"],
+        "seed_min_to_3rd": speed["seed_min_to_3rd"],
+        "seed_min_to_10th": speed["seed_min_to_10th"],
+        "branch_min_to_3rd": speed["branch_min_to_3rd"],
+        "branch_min_to_10th": speed["branch_min_to_10th"],
+        "shuffle_links_mean": shuffle[0],
+        "shuffle_ge_observed": shuffle[1],
     }
 
 
 def tree_records(result):
     """Records for every tree, biggest first (agents, then named links, then token key)."""
+    shuffle = N.per_token(result.null) if result.null is not None else {}
     out = []
     for key, tree in result.trees.items():
         if tree.adoptions:
-            out.append((tree, tree_record(tree, result.tokens[key], result.rows)))
+            out.append((tree, tree_record(tree, result.tokens[key], result.rows,
+                                          shuffle.get(key, (None, None)))))
     out.sort(key=lambda tr: (-tr[1]["agents"], -tr[1]["links_named"], tr[0].token))
     return [rec for _tree, rec in out]
 
@@ -339,29 +327,6 @@ def _group_table(result):
     return [dict([("group", short(name))] + [(f, c[f]) for f in fields]) for name, c in ordered]
 
 
-def _risky_table(records):
-    by_type = Counter()
-    links_by_type = Counter()
-    linked_by_type = Counter()
-    for rec in records:
-        for t in rec["risky"]:
-            by_type[t] += 1
-            links_by_type[t] += rec["links_named"]
-            if rec["links_named"]:
-                linked_by_type[t] += 1
-    return {
-        "types": list(RISKY_TYPES),
-        "narrow_types": list(NARROW_RISKY),
-        "trees_with_type": {t: by_type[t] for t in RISKY_TYPES},
-        "trees_with_type_and_named_links": {t: linked_by_type[t] for t in RISKY_TYPES},
-        "named_links_in_trees_with_type": {t: links_by_type[t] for t in RISKY_TYPES},
-        "trees_with_any_type": sum(1 for r in records if r["risky"]),
-        "trees_with_narrow_type": sum(1 for r in records if set(r["risky"]) & set(NARROW_RISKY)),
-        "trees_with_narrow_type_and_named_links": sum(
-            1 for r in records if r["links_named"] and set(r["risky"]) & set(NARROW_RISKY)),
-    }
-
-
 def _trees_table(records):
     def count(pred):
         return sum(1 for r in records if pred(r))
@@ -384,24 +349,79 @@ def _trees_table(records):
     }
 
 
-def build_facts(result, records, files, params, trees_meta, code, started, total_seconds):
-    """The facts.json object (counts only)."""
+def _null_slot(null_facts):
+    """Fact-sheet slot F5 from the facts.json "nullmodel" section."""
+    links = null_facts["links_named"]
+    share = null_facts["linked_share_of_later_adopters"]
+    adopt = null_facts["adopters"]
+    return {
+        "links_observed": links["observed"],
+        "links_expected_mean": links["mean"],
+        "links_expected_sd": links["sd"],
+        "links_expected_p05": links["p05"],
+        "links_expected_p95": links["p95"],
+        "ratio_observed_to_expected": links["ratio"],
+        "shuffles_ge_observed": links["shuffles_ge_observed"],
+        "shuffles": null_facts["shuffles"],
+        "seed": null_facts["seed"],
+        "scope": null_facts["scope"],
+        "adopters_observed": adopt["observed"],
+        "adopters_expected_mean": adopt["mean"],
+        "linked_share_observed": share["observed"],
+        "linked_share_expected_mean": share["mean"],
+        "linked_share_ratio": share["ratio"],
+        "trees_beating_every_shuffle": null_facts["trees_beating_every_shuffle"],
+        "chance_beats_upper_bound": null_facts["chance_beats_upper_bound"],
+    }
+
+
+def _speed_slot(speed):
+    """Fact-sheet slot F7 from the "scores.speed" section."""
+    to10 = speed["seed_to_10th"]
+    to3 = speed["seed_to_3rd"]
+    fastest = to10["fastest"] or {}
+    return {
+        "fastest_minutes_to_10th": fastest.get("minutes"),
+        "fastest_token_id": fastest.get("token_id"),
+        "fastest_cls": fastest.get("cls"),
+        "fastest_seed_branch": fastest.get("seed_branch"),
+        "trees_reaching_10_in_seed_branch": to10["trees"],
+        "median_minutes_to_10th": to10["median_minutes"],
+        "trees_reaching_3_in_seed_branch": to3["trees"],
+        "median_minutes_to_3rd": to3["median_minutes"],
+        "fastest_minutes_to_3rd": (to3["fastest"] or {}).get("minutes"),
+    }
+
+
+def build_facts(result, records, files, params, trees_meta, code, started, total_seconds,
+                scores=None, risky=None):
+    """The facts.json object (counts, plus agent labels in the influence table)."""
     ts = result.token_stats
     cs = result.tree_stats
     trees = _trees_table(records)
-    risky = _risky_table(records)
+    if risky is None:
+        risky = S.risky_table(records, result.tokens, result.null)
+    if scores is None:
+        scores = S.build_scores(result, records)
+    null_facts = (N.facts_section(result.null, cs["links_named"]) if result.null is not None
+                  else None)
     with_seed = trees["with_effective_seed"]
+    shuffles = result.null.shuffles if result.null is not None else 0
     facts = {
         "tool": "patient-zero",
         "facts_version": FACTS_VERSION,
-        "stage": "J5 first full run: load, tokens, spread trees (shuffle baseline, scores and "
-                 "report are later stages)",
+        "stage": "J6 full run: load, tokens, spread trees, shuffle baseline, scores (the report "
+                 "is a later stage)",
         "input": {"adapter": params["adapter"], "files": files},
         "params": {
             "min_agents": params["min_agents"],
             "max_phrase_share": params["max_phrase_share"],
             "given_texts": params["given_texts"],
-            "randomness": "none in this stage",
+            "shuffles": shuffles,
+            "seed": result.null.seed if result.null is not None else None,
+            "shuffle_scope": result.null.scope if result.null is not None else None,
+            "randomness": ("label shuffle only: random.Random(seed), %d shuffles" % shuffles
+                           if shuffles else "none (no shuffles)"),
         },
         "load": safe_keys(result.load_stats),
         "tokens": safe_keys(ts),
@@ -411,6 +431,8 @@ def build_facts(result, records, files, params, trees_meta, code, started, total
         "groups": _group_table(result),
         "risky": risky,
         "outputs": {"trees.jsonl": trees_meta},
+        "nullmodel": null_facts,
+        "scores": scores,
     }
     facts["slots"] = {
         "F3": {
@@ -432,15 +454,16 @@ def build_facts(result, records, files, params, trees_meta, code, started, total
         "F9": {"links_dropped_by_clock": cs["links_dropped_by_clock"],
                "links_shifted_by_clock": cs["links_shifted_by_clock"],
                "tokens_dropped_by_clock_rule": sum(ts["classes"][c]["clock_dropped"] for c in CLASSES)},
+        "F5": _null_slot(null_facts) if null_facts is not None else None,
+        "F7": _speed_slot(scores["speed"]),
         "F12": {"trees_with_type": risky["trees_with_type"],
-                "trees_with_narrow_type": risky["trees_with_narrow_type"]},
+                "trees_with_narrow_type": risky["trees_with_narrow_type"],
+                "narrow_named_links_vs_shuffle": risky.get("named_links_vs_shuffle", {}).get("narrow")},
         "F14": {"runtime_seconds": round(total_seconds, 1), "code_lines": code["code_lines"],
                 "test_functions": code["test_functions"]},
         "pending": {
-            "F1": "lead finding: picked after the shuffle baseline and scores (J6, J10)",
+            "F1": "lead finding: picked from the trees, shuffle baseline and scores (J10)",
             "F2": "lead tree page family: with F1",
-            "F5": "shuffle baseline (J6 nullmodel)",
-            "F7": "speed to 10th adopter (J6 score)",
             "F10": "hand check (J9)",
             "F11": "planted tests (C2, tests/test_planted.py)",
             "F13": "stretch (J8)",
@@ -472,11 +495,16 @@ def write_outputs(out_dir, result, params, started_clock, started_utc):
     trees_meta = {"lines": len(records), "sha256": hashlib.sha256(lines.encode("ascii")).hexdigest()}
     result.seconds["records"] = time.perf_counter() - t0
     t0 = time.perf_counter()
+    scores = S.build_scores(result, records)
+    risky = S.risky_table(records, result.tokens, result.null)
+    result.seconds["scores"] = time.perf_counter() - t0
+    t0 = time.perf_counter()
     files = input_files(params["adapter"], params["input"])
     code = code_info()
     result.seconds["hash_and_code_info"] = time.perf_counter() - t0
     total = time.perf_counter() - started_clock
-    facts = build_facts(result, records, files, params, trees_meta, code, started_utc, total)
+    facts = build_facts(result, records, files, params, trees_meta, code, started_utc, total,
+                        scores=scores, risky=risky)
     _write_atomic(os.path.join(out_dir, "facts.json"), json.dumps(facts, indent=1, ensure_ascii=True) + "\n")
     return facts
 
@@ -497,6 +525,13 @@ def main(argv=None, out=None):
     ap.add_argument("--max-phrase-share", type=float, default=MAX_PHRASE_SHARE)
     ap.add_argument("--given", action="append", default=[],
                     help="a shared goal or prompt text file; its tokens are dropped (repeatable)")
+    ap.add_argument("--shuffles", type=int, default=N.DEFAULT_SHUFFLES,
+                    help="label shuffles for the chance baseline (default %d; 0 skips it)"
+                    % N.DEFAULT_SHUFFLES)
+    ap.add_argument("--seed", type=int, default=N.DEFAULT_SEED,
+                    help="seed for the shuffles (default %d)" % N.DEFAULT_SEED)
+    ap.add_argument("--shuffle-scope", choices=N.SCOPES, default=N.SCOPE_DAY,
+                    help="permute labels within each UTC day (default) or within each place and day")
     args = ap.parse_args(argv)
     started_clock = time.perf_counter()
     started_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -507,7 +542,8 @@ def main(argv=None, out=None):
             with open(path, "r", encoding="utf-8") as fh:
                 given.append(fh.read())
         result = run(args.adapter, args.input, min_agents=args.min_agents,
-                     max_phrase_share=args.max_phrase_share, given_texts=given)
+                     max_phrase_share=args.max_phrase_share, given_texts=given,
+                     shuffles=args.shuffles, seed=args.seed, scope=args.shuffle_scope)
         params = {"adapter": args.adapter, "input": args.input, "min_agents": args.min_agents,
                   "max_phrase_share": args.max_phrase_share, "given_texts": len(given)}
         facts = write_outputs(args.out, result, params, started_clock, started_utc)
@@ -524,6 +560,17 @@ def main(argv=None, out=None):
         s["F6"]["branches_5plus_agents"], s["F6"]["branches_10plus_agents"]), file=out)
     print("links named: %d, dropped by clock %d, parallel starts %d" % (
         s["F4"]["links_named"], s["F9"]["links_dropped_by_clock"], s["F8"]["parallel_starts"]), file=out)
+    f5 = s["F5"]
+    if f5 and f5["shuffles"]:
+        print("shuffle (%s, %d x, seed %d): expected named links %.1f (sd %.1f), observed / expected %s; "
+              "shuffles reaching the observed count %d" % (
+                  f5["scope"], f5["shuffles"], f5["seed"], f5["links_expected_mean"],
+                  f5["links_expected_sd"], f5["ratio_observed_to_expected"], f5["shuffles_ge_observed"]),
+              file=out)
+    f7 = s["F7"]
+    print("speed: %d trees reach a 10th agent in the seed's branch; fastest %s min, median %s min" % (
+        f7["trees_reaching_10_in_seed_branch"], f7["fastest_minutes_to_10th"], f7["median_minutes_to_10th"]),
+        file=out)
     print("runtime: %.1f s (target under %d s)" % (facts["runtime"]["total_seconds"], TARGET_SECONDS),
           file=out)
     print("wrote: %s and %s" % (os.path.join(args.out, "facts.json"),

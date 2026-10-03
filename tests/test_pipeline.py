@@ -5,6 +5,7 @@ the real-data run (gate G1) runs only when PZ_DATA names the collusion.wiki
 export folder. Failure messages carry counts only, never names or text.
 """
 
+import contextlib
 import io
 import json
 import os
@@ -28,11 +29,13 @@ RECORD_FIELDS = (
     "shifted_by_clock", "depth", "largest_branch", "largest_branch_root", "max_children", "uses",
     "places", "families", "groups", "first_user", "first_use", "first_family", "first_group",
     "effective_seed", "seed_use", "seed_family", "seed_children", "seed_is_first_user",
-    "span_hours", "named_lag_median_s", "risky",
+    "span_hours", "named_lag_median_s", "risky", "seed_branch", "seed_min_to_3rd",
+    "seed_min_to_10th", "branch_min_to_3rd", "branch_min_to_10th", "shuffle_links_mean",
+    "shuffle_ge_observed",
 )
 FACT_KEYS = ("tool", "facts_version", "input", "params", "load", "tokens", "cascade", "trees",
-             "families", "groups", "risky", "outputs", "slots", "core_keys", "core_sha256",
-             "code", "runtime")
+             "families", "groups", "risky", "outputs", "nullmodel", "scores", "slots", "core_keys",
+             "core_sha256", "code", "runtime")
 
 
 def _strings(obj):
@@ -85,8 +88,12 @@ class ExampleRun(unittest.TestCase):
         self.assertEqual(self.facts["core_keys"], list(P.CORE_KEYS))
         self.assertEqual(self.facts["input"]["files"][0]["name"], "fake_log.ndjson")
         self.assertNotIn(json.dumps(ROOT)[1:-1], json.dumps(self.facts))  # base names only
-        for slot in ("F3", "F4", "F6", "F8", "F9", "F12", "F14", "pending"):
+        for slot in ("F3", "F4", "F5", "F6", "F7", "F8", "F9", "F12", "F14", "pending"):
             self.assertIn(slot, self.facts["slots"])
+        for slot in ("F5", "F7"):
+            self.assertNotIn(slot, self.facts["slots"]["pending"])
+        self.assertIn("nullmodel", P.CORE_KEYS)
+        self.assertIn("scores", P.CORE_KEYS)
 
     def test_numbers_agree(self):
         f = self.facts
@@ -101,6 +108,15 @@ class ExampleRun(unittest.TestCase):
         self.assertEqual(sum(fam["named_links_from_here"] for fam in f["families"]),
                          f["cascade"]["links_named"])
         self.assertEqual(sum(g["rows"] for g in f["groups"]), f["load"]["rows"])
+        self.assertTrue(f["nullmodel"]["observed_matches_cascade"])
+        self.assertEqual(f["nullmodel"]["links_named"]["observed"], f["cascade"]["links_named"])
+        self.assertEqual(f["slots"]["F5"]["links_observed"], f["cascade"]["links_named"])
+        self.assertEqual(f["slots"]["F5"]["shuffles"], 100)
+        self.assertEqual(f["params"]["shuffles"], 100)
+        self.assertEqual(f["scores"]["influence"]["named_links"], f["cascade"]["links_named"])
+        self.assertTrue(f["scores"]["family_flow"]["observed_matches_nullmodel"])
+        speed = f["scores"]["speed"]["seed_to_3rd"]
+        self.assertEqual(speed["trees"], sum(1 for r in self.records if r["seed_min_to_3rd"] is not None))
 
     def test_records(self):
         for rec in self.records:
@@ -115,6 +131,12 @@ class ExampleRun(unittest.TestCase):
         self.assertEqual(lead["token"], "convention:control:BLUEHERON")
         self.assertEqual(lead["largest_branch"], 4)
         self.assertEqual(lead["depth"], 3)
+        self.assertEqual(lead["seed_branch"], 4)
+        self.assertIsNotNone(lead["seed_min_to_3rd"])
+        self.assertIsNone(lead["seed_min_to_10th"])
+        for rec in self.records:
+            self.assertGreaterEqual(rec["shuffle_links_mean"], 0)
+            self.assertTrue(0 <= rec["shuffle_ge_observed"] <= 100)
 
     def test_strings_short_and_ascii(self):
         for s in _strings(self.records):
@@ -134,6 +156,45 @@ class ExampleRun(unittest.TestCase):
             trees_b = fh.read()
         self.assertEqual(trees_b, self.trees_text)
         self.assertEqual(facts_b["core_sha256"], self.facts["core_sha256"])
+
+
+class ShuffleOptions(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="pz-pipeline-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def facts(self, *extra):
+        out = os.path.join(self.tmp, "o%d" % len(os.listdir(self.tmp)))
+        code, text = run_cli(["--adapter", "generic", "--input", EXAMPLE, "--out", out] + list(extra))
+        self.assertEqual(code, 0, text)
+        with open(os.path.join(out, "facts.json"), encoding="utf-8") as fh:
+            return json.load(fh), text
+
+    def test_zero_shuffles(self):
+        facts, text = self.facts("--shuffles", "0")
+        self.assertEqual(facts["params"]["shuffles"], 0)
+        self.assertEqual(facts["slots"]["F5"]["shuffles"], 0)
+        self.assertIsNone(facts["slots"]["F5"]["links_expected_mean"])
+        self.assertNotIn("shuffle (", text)
+
+    def test_seed_and_scope_change_only_the_shuffle(self):
+        base, text = self.facts()
+        self.assertIn("shuffle (day, 100 x, seed %d)" % P.N.DEFAULT_SEED, text)
+        other, _ = self.facts("--seed", "7", "--shuffles", "40")
+        scoped, _ = self.facts("--shuffle-scope", "place_day")
+        self.assertEqual(other["params"]["seed"], 7)
+        self.assertEqual(scoped["nullmodel"]["scope"], "place_day")
+        for facts in (other, scoped):
+            self.assertEqual(facts["cascade"], base["cascade"])
+            self.assertEqual(facts["nullmodel"]["links_named"]["observed"],
+                             base["nullmodel"]["links_named"]["observed"])
+            self.assertNotEqual(facts["core_sha256"], base["core_sha256"])
+
+    def test_bad_scope_rejected(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            run_cli(["--adapter", "generic", "--input", EXAMPLE, "--out", self.tmp, "--shuffle-scope", "week"])
 
 
 class Guards(unittest.TestCase):
@@ -245,6 +306,11 @@ class RealDataRun(unittest.TestCase):
         self.assertEqual(len(self.records), f["trees"]["total"])
         self.assertTrue(f["runtime"]["under_target"])
         self.assertEqual(sorted(x["name"] for x in f["input"]["files"]), sorted(P.WIKI_FILES))
+        self.assertTrue(f["nullmodel"]["observed_matches_cascade"])
+        self.assertEqual(f["nullmodel"]["shuffles"], 100)
+        self.assertEqual(f["nullmodel"]["links_named"]["shuffles"], 100)
+        self.assertTrue(f["scores"]["family_flow"]["observed_matches_nullmodel"])
+        self.assertEqual(f["scores"]["influence"]["named_links"], f["cascade"]["links_named"])
 
     def test_human_handles_never_named(self):
         humans = set()
@@ -257,13 +323,20 @@ class RealDataRun(unittest.TestCase):
             for key in ("first_user", "effective_seed", "largest_branch_root"):
                 if rec[key] is not None:
                     named.add(rec[key])
+        influence = set(row["agent"] for row in self.facts["scores"]["influence"]["top"])
         self.assertEqual(len(humans & named), 0)
+        self.assertEqual(len(humans & influence), 0)
 
     def test_strings_short(self):
         too_long = sum(1 for s in _strings(self.records) if len(s) > P.SHORT_MAX)
         self.assertEqual(too_long, 0)
         non_ascii = sum(1 for s in _strings(self.records) if re.search(r"[^\x20-\x7e]", s))
         self.assertEqual(non_ascii, 0)
+        scores = self.facts["scores"]
+        data_strings = [row["agent"] for row in scores["influence"]["top"]]
+        data_strings += [p[k] for p in scores["family_flow"]["top_pairs"] for k in ("from", "to")]
+        self.assertEqual(sum(1 for s in data_strings if len(s) > P.SHORT_MAX), 0)
+        self.assertEqual(sum(1 for s in data_strings if re.search(r"[^\x20-\x7e]", s)), 0)
 
 
 if __name__ == "__main__":
