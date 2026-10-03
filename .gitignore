@@ -1,0 +1,7 @@
+# No data and no outputs in this repo, ever.
+data/
+out/
+*.gz
+*.jsonl
+*.zip
+__pycache__/
