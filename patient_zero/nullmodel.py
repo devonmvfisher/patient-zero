@@ -174,7 +174,7 @@ def build_index(rows, tokens):
 # ---------------------------------------------------------------- counting
 
 
-def count_links(index, labels, pairs=None, detail=False):
+def count_links(index, labels, pairs=None, detail=False, strict=False):
     """Classify every adopter of every token under ``labels`` (row -> agent id, -1 exposure-only).
 
     Same rules as ``cascade.adopt``: B's exposure to an earlier use U needs a
@@ -182,6 +182,10 @@ def count_links(index, labels, pairs=None, detail=False):
     visit and F must both be in clock order after U; credit goes to the most
     recent such U. ``pairs`` (a Counter) gets +1 per named link keyed by
     (source family id, target family id).
+
+    ``strict=True`` (used by ``patient_zero.checks``, never by the main run)
+    asks for a visit strictly before F: the adoption save itself does not
+    count as seeing the page.
     """
     times, unc, place, family = index.times, index.unc, index.place, index.family
     visits = {}
@@ -223,7 +227,7 @@ def count_links(index, labels, pairs=None, detail=False):
                 k = bisect_left(U, f)  # uses strictly before F on this place
                 if k == 0:
                     continue
-                hv = bisect_right(V, f)  # visits no later than F
+                hv = bisect_left(V, f) if strict else bisect_right(V, f)  # visits before / no later than F
                 if hv == 0:
                     continue
                 last_v = V[hv - 1]
