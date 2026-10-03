@@ -369,9 +369,12 @@ class Verdict(unittest.TestCase):
         self.assertIn("100 of 100 shuffles", text)
         self.assertIn("not evidence of spread beyond chance", text)
         self.assertIn("within each UTC day", text)
+        self.assertIn("does not show that agents avoid each other's tricks", text)
+        self.assertIn("patient_zero.checks", text)
         word, text = R.chance_verdict(f5(80, 40.0, 35.0, 46.0, 0))
         self.assertEqual(word, "above chance")
         self.assertIn("hand-check", text)
+        self.assertNotIn("avoid each other's tricks", text)
         word, text = R.chance_verdict(f5(7, 5.5, 4.0, 7.0, 14))
         self.assertEqual(word, "within chance")  # on the 95th percentile is still inside
         self.assertIn("not evidence of spread beyond chance", text)

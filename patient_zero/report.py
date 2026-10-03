@@ -836,6 +836,9 @@ def chance_verdict(f5):
     if word == "below chance":
         text += (" Fewer adoptions follow a visit to an earlier user's page than when agent labels are shuffled "
                  "%s, so these links are not evidence of spread beyond chance." % scope)
+        text += (" Falling below this shuffle does not show that agents avoid each other's tricks: the shuffle "
+                 "deals one agent's repeated uses of a token to several labels, which adds adopters and links. "
+                 "The order null in patient_zero.checks keeps every agent's own rows and is the fairer baseline.")
     elif word == "within chance":
         text += (" About as many adoptions follow a visit to an earlier user's page as when agent labels are "
                  "shuffled %s, so these links are not evidence of spread beyond chance." % scope)
