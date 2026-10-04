@@ -25,7 +25,24 @@ UNVERIFIED and the source checks are still written.
     python tools/figcheck.py                      # docs/lead.svg -> ../out/
     python tools/figcheck.py --svg docs/lead.svg --out-dir ../out --scale 0.5
 
-Exit codes: 0 PASS, 1 FAIL, 2 bad input, 3 UNVERIFIED (no render).
+Data mode (``--sources``, for docs/can-it-see.svg): no browser, only
+arithmetic on the SVG source and the JSON files it was drawn from. Every row
+group (``class="cis-row"``) names its source file, JSON path and null id.
+Eight checks (``DATA_PLANNED``): every number in every text equals its source
+to the printed precision and every ``data-*`` value equals it exactly; every
+row cites one null id, the id each source's null fields give, and the two
+sources share the same real-data result under that null (``h0``); dots and
+bands sit where the numbers put them on the one axis; position words follow
+from the numbers; no z, sd or sigma and exactly one axis; printed hashes are
+the SHA-256 prefixes of the named files; and the phone check, smallest font
+px × 358 / canvas width ≥ 10 (the figure stays readable at 10 px on a phone
+that shows 358 px); and the five rows are all there, in order, so no
+inconvenient row can be dropped (only the decoy may wait for its numbers)::
+
+    python tools/figcheck.py --svg docs/can-it-see.svg \\
+        --sources ../out/calibration.json ../out/checks.json --out-dir ../out
+
+Exit codes: 0 PASS, 1 FAIL, 2 bad input, 3 UNVERIFIED (no render; lead mode only).
 """
 
 import argparse
@@ -63,6 +80,48 @@ PLANNED = {
 COLOUR_TOLERANCE = 18  # per channel, for anti-aliasing and colour management
 DIFF_LEVEL = 48  # a pixel "changed" when some channel moves by more than this
 MIN_CHANGED = 20  # changed pixels a drawn text box must show
+
+PHONE_WIDTH = 358  # px a small phone shows
+PHONE_MIN_PX = 10.0  # smallest text there
+DEFAULT_FONT = 16.0  # an SVG text with no font-size anywhere up its tree
+DATA_PLANNED = {
+    "numbers_match_sources": "every number in every text equals its JSON source to the printed precision, every "
+                             "data-* value equals it exactly, and each drawn row prints its observed, mean and ratio",
+    "same_null": "every row cites one null id, the id its source's null fields give; the footer prints its tag "
+                 "(first 12 hex of the id's SHA-256); calibration null.h0 equals checks order_null.links_named; "
+                 "the real same-page and cross-page counts and means add up to null.h0",
+    "geometry_matches": "each dot sits at observed / mean and each band spans p05 / mean to p95 / mean on the one "
+                        "axis; tick labels sit at their values; one accent colour for dots, a grey band",
+    "words_match": "each row's position words (above, inside or below the band, and seen / blind spot / not "
+                   "flagged / wrongly flagged) follow from its numbers and its planted kind",
+    "no_z": "no z, sd or sigma in any text and exactly one axis",
+    "hashes_match": "every hash printed is the SHA-256 prefix of the source file named beside it, and every "
+                    "source's hash is printed",
+    "phone_check": "smallest font px x %d / canvas width >= %g" % (PHONE_WIDTH, PHONE_MIN_PX),
+    "rows_complete": "the five rows are there in order (carry, same-page, decoy, real all, real cross-page); only the "
+                     "decoy may be pending or left out, and only while its source has no numbers",
+}
+# Rows of docs/can-it-see.svg, in order: (key, source, JSON path, may be missing).
+DATA_ROWS = (
+    ("carry", "calibration.json", "planted.carry.all_links", False),
+    ("same_page", "calibration.json", "planted.contagion.all_links", False),
+    ("page_instruction", "calibration.json", "planted.page_instruction.all_links", True),
+    ("real_all", "checks.json", "order_null.links_named", False),
+    ("real_cross", "calibration.json", "real.cross_page", False),
+)
+GEOM_TOL = 0.11  # px: coordinates are written to 0.1
+MIN_BAND = 2.0  # px: a narrower band is drawn this wide, centred
+BAND_PERCENTILES = (5.0, 95.0)  # the band's definition (p05, p95), allowed in a text that says "percentile"
+NUMBER_RE = re.compile(r"(?<![\d.,])\d[\d,]*(?:\.\d+)?")
+HEX_RE = re.compile(r"(?<![0-9a-z])[0-9a-f]{12,64}(?![0-9a-z])")
+Z_RE = re.compile(r"(?i)(?<![a-z])(?:z|sd|sigma|std|z-score|stdev)(?![a-z])|σ")
+POSITION_WORDS = {
+    "contact": {"above": "seen", "inside": "blind spot", "below": "reads the wrong way"},
+    "decoy": {"above": "wrongly flagged", "inside": "not flagged", "below": "not flagged"},
+    "real": {},
+}
+CELL_KEYS = ("observed", "mean", "p05", "p95")
+SPLIT_TOL = 0.011  # two means rounded to 0.01 can miss their rounded sum by 0.01
 
 
 # ---------------------------------------------------------------- PNG (8-bit RGB or RGBA, not interlaced)
@@ -302,6 +361,359 @@ def rendered_checks(info, full, blank, scale):
     }
 
 
+# ---------------------------------------------------------------- data mode (--sources): arithmetic only
+
+
+def _sha256_path(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def font_sizes(root):
+    """Font size (px) of every <text>, taken from the element or the nearest ancestor that sets one."""
+    sizes = []
+
+    def walk(el, inherited):
+        size = el.get("font-size")
+        here = float(re.sub(r"px$", "", size)) if size else inherited
+        if _tag(el) == "text":
+            sizes.append(here)
+        for child in el:
+            walk(child, here)
+
+    walk(root, DEFAULT_FONT)
+    return sizes
+
+
+def phone_check(root):
+    width = float(root.get("width"))
+    sizes = font_sizes(root)
+    smallest = min(sizes) if sizes else DEFAULT_FONT
+    px = smallest * PHONE_WIDTH / width
+    return {"canvas_width": width, "smallest_font": smallest, "phone_px": round(px, 3),
+            "rule": "smallest font x %d / canvas width >= %g" % (PHONE_WIDTH, PHONE_MIN_PX),
+            "pass": px >= PHONE_MIN_PX}
+
+
+def _null_block(doc):
+    """(kind, block) of a source's null: calibration.json's 'null', or checks.json's 'order_null'."""
+    if isinstance(doc.get("null"), dict):
+        return doc["null"].get("kind"), doc["null"]
+    if isinstance(doc.get("order_null"), dict):
+        return "order", doc["order_null"]
+    return None, None
+
+
+def expected_null_id(doc):
+    kind, block = _null_block(doc)
+    if block is None or any(k not in block for k in ("scope", "shuffles", "seed", "min_lag_seconds",
+                                                     "strict_exposure")):
+        return None
+    return "%s:%s:lag%s:%s:seed%s:n%s" % (kind, block["scope"], block["min_lag_seconds"],
+                                          "strict" if block["strict_exposure"] else "default", block["seed"],
+                                          block["shuffles"])
+
+
+def _resolve(doc, dotted):
+    for part in dotted.split("."):
+        if not isinstance(doc, dict) or part not in doc:
+            return None
+        doc = doc[part]
+    return doc
+
+
+def _printed_matches(printed, value):
+    """A printed number equals a source value to the printed precision."""
+    digits = len(printed.split(".", 1)[1]) if "." in printed else 0
+    return abs(float(printed.replace(",", "")) - float(value)) <= 0.5 * 10 ** (-digits) + 1e-9
+
+
+def _texts(el):
+    return [(t, "".join(t.itertext())) for t in el.iter() if _tag(t) == "text"]
+
+
+def _role_expected(row, sources):
+    path = row.get("data-path", "")
+    if not path.startswith("planted."):
+        return "real"
+    kind = _resolve(sources.get(row.get("data-source")) or {}, ".".join(path.split(".")[:2])) or {}
+    if "contact" not in kind:
+        return None
+    return "contact" if kind["contact"] else "decoy"
+
+
+def data_checks(svg_path, source_paths):
+    """The eight data checks (DATA_PLANNED) of a can-it-see figure against its JSON sources."""
+    root = ET.parse(svg_path).getroot()
+    if _tag(root) != "svg":
+        raise ValueError("not an SVG")
+    sources, hashes = {}, {}
+    for path in source_paths:
+        name = os.path.basename(path)
+        with open(path, encoding="utf-8") as fh:
+            sources[name] = json.load(fh)
+        hashes[name] = _sha256_path(path)
+    rows = [el for el in root.iter() if "cis-row" in (el.get("class") or "").split()]
+    axes = [el for el in root.iter() if "cis-axis" in (el.get("class") or "").split()]
+    problems = {name: [] for name in DATA_PLANNED}
+
+    def bad(check, message):
+        problems[check].append(message)
+
+    # The one axis.
+    if len(axes) != 1:
+        bad("no_z", "%d axes (want exactly 1)" % len(axes))
+    X = None
+    if axes:
+        ax = axes[0]
+        lo, hi = float(ax.get("data-lo")), float(ax.get("data-hi"))
+        x0, x1 = float(ax.get("data-x0")), float(ax.get("data-x1"))
+
+        def X(v):
+            return x0 + (v - lo) / (hi - lo) * (x1 - x0)
+
+    # The null every row must share.
+    ids = {name: expected_null_id(doc) for name, doc in sources.items()}
+    row_ids = set(r.get("data-null") for r in rows)
+    if len(row_ids) != 1:
+        bad("same_null", "rows cite %d different null ids" % len(row_ids))
+    the_id = next(iter(row_ids)) if len(row_ids) == 1 else None
+    cal, chk = sources.get("calibration.json"), sources.get("checks.json")
+    if cal is not None and chk is not None:
+        h0 = (cal.get("null") or {}).get("h0") or {}
+        real = (chk.get("order_null") or {}).get("links_named") or {}
+        if not h0 or any(h0.get(k) != real.get(k) for k in ("observed", "mean", "sd")):
+            bad("same_null", "calibration null.h0 differs from checks order_null.links_named")
+        split = [(cal.get("real") or {}).get(k) for k in ("same_page", "cross_page")]
+        if h0 and all(split) and (split[0].get("observed", 0) + split[1].get("observed", 0) != h0.get("observed")
+                                  or abs(split[0].get("mean", 0) + split[1].get("mean", 0) - h0.get("mean", 0))
+                                  > SPLIT_TOL):
+            bad("same_null", "calibration real same_page + cross_page do not add up to null.h0")
+    shuffles = set()
+    for doc in sources.values():
+        _kind, block = _null_block(doc)
+        if block is not None and "shuffles" in block:
+            shuffles.add(block["shuffles"])
+
+    drawn, dots, bands = 0, [], []
+    for row in rows:
+        key = row.get("data-row") or "?"
+        src_name, dotted = row.get("data-source"), row.get("data-path") or ""
+        if src_name not in sources:
+            bad("numbers_match_sources", "row %s: source %s not given" % (key, src_name))
+            continue
+        if ids.get(src_name) is None:
+            bad("same_null", "row %s: %s has no null fields" % (key, src_name))
+        elif row.get("data-null") != ids[src_name]:
+            bad("same_null", "row %s: cites %s, its source gives %s" % (key, row.get("data-null"), ids[src_name]))
+        cell = _resolve(sources[src_name], dotted)
+        texts = _texts(row)
+        if row.get("data-status") == "pending":
+            if cell is not None:
+                bad("numbers_match_sources", "row %s: drawn as pending but %s has %s" % (key, src_name, dotted))
+            if any(_tag(el) in ("circle", "rect") for el in row.iter()):
+                bad("geometry_matches", "row %s: a pending row draws a dot or band" % key)
+            for _t, s in texts:
+                if NUMBER_RE.search(s):
+                    bad("numbers_match_sources", "row %s: a pending row prints a number" % key)
+            continue
+        if not isinstance(cell, dict) or any(not isinstance(cell.get(k), (int, float)) for k in CELL_KEYS):
+            bad("numbers_match_sources", "row %s: %s has no full cell at %s" % (key, src_name, dotted))
+            continue
+        drawn += 1
+        for k in CELL_KEYS:
+            got = row.get("data-" + k)
+            if got is None or float(got) != float(cell[k]):
+                bad("numbers_match_sources", "row %s: data-%s %s != %s" % (key, k, got, cell[k]))
+        obs, mean, p05, p95 = (float(cell[k]) for k in CELL_KEYS)
+        ratio = obs / mean
+        # Every number printed in the row is its observed, mean or ratio; each of the three is printed.
+        seen = set()
+        for _t, s in texts:
+            for m in NUMBER_RE.finditer(s):
+                hit = [name for name, v in (("observed", obs), ("mean", mean), ("ratio", ratio))
+                       if _printed_matches(m.group(0), v)]
+                if not hit:
+                    bad("numbers_match_sources", "row %s: printed %s matches none of observed %s, mean %s, "
+                                                 "ratio %.6f" % (key, m.group(0), cell["observed"], cell["mean"],
+                                                                 ratio))
+                seen.update(hit)
+        for name in ("observed", "mean", "ratio"):
+            if name not in seen:
+                bad("numbers_match_sources", "row %s: %s is not printed" % (key, name))
+        # Words.
+        position = "above" if obs > p95 else ("below" if obs < p05 else "inside")
+        role = _role_expected(row, sources)
+        if role is None:
+            bad("words_match", "row %s: %s has no contact flag for its planted kind" % (key, src_name))
+        elif row.get("data-role") != role:
+            bad("words_match", "row %s: role %s, source says %s" % (key, row.get("data-role"), role))
+        where_texts = [s for t, s in texts if "cis-where" in (t.get("class") or "")]
+        wanted = "%s the band" % position
+        word = POSITION_WORDS.get(role or "real", {}).get(position)
+        if not where_texts or wanted not in where_texts[0]:
+            bad("words_match", "row %s: position should read '%s'" % (key, wanted))
+        elif word and not where_texts[0].endswith(word):
+            bad("words_match", "row %s: should end '%s'" % (key, word))
+        elif not word and not where_texts[0].endswith(wanted):
+            bad("words_match", "row %s: should end '%s'" % (key, wanted))
+        for other in ("above the band", "inside the band", "below the band"):
+            if other != wanted and any(other in s for s in where_texts):
+                bad("words_match", "row %s: also says '%s'" % (key, other))
+        # Geometry on the one axis.
+        circles = [el for el in row.iter() if "cis-dot" in (el.get("class") or "").split()]
+        rects = [el for el in row.iter() if "cis-band" in (el.get("class") or "").split()]
+        if len(circles) != 1 or len(rects) != 1:
+            bad("geometry_matches", "row %s: %d dots and %d bands (want 1 and 1)" % (key, len(circles), len(rects)))
+        elif X is not None:
+            dot, band = circles[0], rects[0]
+            dots.append(dot)
+            bands.append(band)
+            if abs(float(dot.get("cx")) - X(ratio)) > GEOM_TOL:
+                bad("geometry_matches", "row %s: dot at %s, numbers put it at %.2f" % (key, dot.get("cx"), X(ratio)))
+            left, right = X(p05 / mean), X(p95 / mean)
+            if right - left < MIN_BAND:
+                mid = (left + right) / 2.0
+                left, right = mid - MIN_BAND / 2.0, mid + MIN_BAND / 2.0
+            bx, bw = float(band.get("x")), float(band.get("width"))
+            if abs(bx - left) > GEOM_TOL or abs(bx + bw - right) > 2 * GEOM_TOL:
+                bad("geometry_matches", "row %s: band %.1f-%.1f, numbers give %.2f-%.2f"
+                    % (key, bx, bx + bw, left, right))
+            if not (x0 - GEOM_TOL <= float(dot.get("cx")) <= x1 + GEOM_TOL and x0 - GEOM_TOL <= bx
+                    and bx + bw <= x1 + 2 * GEOM_TOL):
+                bad("geometry_matches", "row %s: drawn outside the axis" % key)
+    if drawn == 0:
+        bad("numbers_match_sources", "no drawn row")
+    if dots:
+        fills = set((d.get("fill") or "").lower() for d in dots)
+        band_fills = set((b.get("fill") or "").lower() for b in bands)
+        if len(fills) != 1:
+            bad("geometry_matches", "dots use %d colours (want one accent)" % len(fills))
+        if fills & band_fills:
+            bad("geometry_matches", "a band has the accent colour")
+        for fill in band_fills:
+            r, g, b = hex_rgb(fill)
+            if max(r, g, b) - min(r, g, b) > 24:
+                bad("geometry_matches", "band colour %s is not grey" % fill)
+
+    # Every text outside the rows: the null id, hashes, ticks, the shuffle count, the band's definition.
+    in_rows = set(t for row in rows for t in row.iter())  # row texts were checked against their own row
+    printed_hashes = set()
+    title = root.find(SVG_NS + "title")
+    outside = [(t, "".join(t.itertext())) for t in root.iter() if _tag(t) == "text" and t not in in_rows]
+    if title is not None:
+        outside.append((title, title.text or ""))
+    all_text = [s for _t, s in _texts(root)] + ([title.text or ""] if title is not None else [])
+    id_printed = False
+    tag = "null id " + hashlib.sha256(the_id.encode("utf-8")).hexdigest()[:12] if the_id else None
+    seeds = set()
+    for doc in sources.values():
+        _kind, block = _null_block(doc)
+        if block is not None and "seed" in block:
+            seeds.add(block["seed"])
+    for el, s in outside:
+        if tag and tag in s:
+            id_printed = True
+            s = s.replace(tag, " ")
+        rest = s
+        for m in HEX_RE.finditer(s):
+            named = [n for n in hashes if n in s]
+            if len(named) == 1 and hashes[named[0]].startswith(m.group(0)) and "sha256 " + m.group(0) in s:
+                printed_hashes.add(named[0])
+            else:
+                bad("hashes_match", "hash %s... matches no source named beside it" % m.group(0)[:8])
+            # A hash is judged here, not as a number; the algorithm's name goes with it.
+            rest = rest.replace("sha256 " + m.group(0), " ").replace(m.group(0), " ")
+        is_tick = "cis-tick-label" in (el.get("class") or "")
+        for m in NUMBER_RE.finditer(rest):
+            value = float(m.group(0).replace(",", ""))
+            if is_tick and X is not None:
+                if abs(float(el.get("x")) - X(value)) > GEOM_TOL:
+                    bad("geometry_matches", "tick label %s at x %s, the axis puts it at %.2f"
+                        % (m.group(0), el.get("x"), X(value)))
+                continue
+            if value in shuffles and "shuffles" in rest:
+                continue
+            if value in seeds and "seed" in rest:
+                continue
+            if value in BAND_PERCENTILES and "percentile" in rest:
+                continue
+            bad("numbers_match_sources", "unexplained number %s outside the rows" % m.group(0))
+    if the_id and not id_printed:
+        bad("same_null", "the null tag is not printed")
+    for name in hashes:
+        if name not in printed_hashes:
+            bad("hashes_match", "%s's hash is not printed" % name)
+    for s in all_text:
+        if Z_RE.search(s):
+            bad("no_z", "a text names z, sd or sigma")
+    for el in root.iter():
+        if any(k.startswith("data-z") or k == "data-sd" for k in el.attrib):
+            bad("no_z", "a data-z or data-sd attribute")
+    keys = [r.get("data-row") for r in rows]
+    wanted = [k for k, _s, _p, _o in DATA_ROWS]
+    if [k for k in wanted if k in keys] != keys:
+        bad("rows_complete", "rows %s are not the expected rows in order" % ",".join(str(k) for k in keys))
+    by_key = dict((r.get("data-row"), r) for r in rows)
+    for key, src_name, dotted, optional in DATA_ROWS:
+        row = by_key.get(key)
+        if row is not None and (row.get("data-source"), row.get("data-path")) != (src_name, dotted):
+            bad("rows_complete", "row %s reads %s %s, not %s %s" % (key, row.get("data-source"),
+                                                                    row.get("data-path"), src_name, dotted))
+        has_numbers = src_name in sources and _resolve(sources[src_name], dotted) is not None
+        if row is None and (not optional or has_numbers):
+            bad("rows_complete", "row %s is missing%s" % (key, " although %s has its numbers" % src_name
+                                                         if optional else ""))
+        if row is not None and row.get("data-status") != "drawn" and not optional:
+            bad("rows_complete", "row %s must be drawn" % key)
+    phone = phone_check(root)
+    if not phone["pass"]:
+        bad("phone_check", "phone px %.2f < %g" % (phone["phone_px"], PHONE_MIN_PX))
+    checks = {name: {"pass": not problems[name], "problems": problems[name][:20]} for name in DATA_PLANNED}
+    checks["phone_check"].update(phone)
+    checks["same_null"]["null_id"] = the_id
+    checks["numbers_match_sources"]["rows_drawn"] = drawn
+    checks["numbers_match_sources"]["rows_pending"] = sum(1 for r in rows if r.get("data-status") == "pending")
+    return {"checks": checks, "source_sha256": hashes}
+
+
+def data_main(args, out):
+    """--sources: arithmetic checks only, no browser."""
+    json_path = os.path.join(args.out_dir, args.json or (os.path.splitext(os.path.basename(args.svg))[0]
+                                                         + "-checks.json"))
+    try:
+        with open(args.svg, "r", encoding="utf-8") as fh:
+            svg_text = fh.read()
+        result = data_checks(args.svg, args.sources)
+    except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as exc:
+        print("figcheck: ERROR: %s" % exc, file=out)
+        return 2
+    os.makedirs(args.out_dir, exist_ok=True)
+    checks = result["checks"]
+    report = {"tool": "tools/figcheck.py --sources", "figure": os.path.basename(args.svg),
+              "figure_sha256": hashlib.sha256(svg_text.encode("utf-8")).hexdigest(),
+              "sources": {os.path.basename(p): result["source_sha256"][os.path.basename(p)] for p in args.sources},
+              "planned_checks": DATA_PLANNED, "checks": checks,
+              "viewer": "mechanical: arithmetic on the SVG source and the JSON sources; no browser, nobody looked",
+              "status": "PASS" if all(c["pass"] for c in checks.values()) else "FAIL"}
+    _write_json(json_path, report)
+    print("figcheck: %s (%s)" % (report["status"], ", ".join(
+        "%s=%s" % (k, "ok" if c["pass"] else "FAIL") for k, c in checks.items())), file=out)
+    for name, c in checks.items():
+        for p in c["problems"]:
+            print("  %s: %s" % (name, p), file=out)
+    print("phone px %.2f (smallest font %g at width %g); null id %s; rows drawn %d, pending %d"
+          % (checks["phone_check"]["phone_px"], checks["phone_check"]["smallest_font"],
+             checks["phone_check"]["canvas_width"], checks["same_null"]["null_id"],
+             checks["numbers_match_sources"]["rows_drawn"], checks["numbers_match_sources"]["rows_pending"]),
+          file=out)
+    print("wrote: %s" % json_path, file=out)
+    return 0 if report["status"] == "PASS" else 1
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -318,12 +730,17 @@ def main(argv=None, out=None):
     ap.add_argument("--svg", default=os.path.join(REPO, "docs", "lead.svg"))
     ap.add_argument("--out-dir", default=os.path.join(os.path.dirname(REPO), "out"))
     ap.add_argument("--png", default="lead-check.png")
-    ap.add_argument("--json", default="lead-checks.json")
+    ap.add_argument("--json", default=None, help="report name (default lead-checks.json, or <figure>-checks.json "
+                                                 "with --sources)")
     ap.add_argument("--scale", type=float, default=0.5)
     ap.add_argument("--browser", help="path to chrome or msedge (default: look in the usual places)")
+    ap.add_argument("--sources", nargs="+", metavar="JSON",
+                    help="data mode: the JSON files the figure was drawn from (no browser; arithmetic only)")
     args = ap.parse_args(argv)
+    if args.sources:
+        return data_main(args, out)
     png_path = os.path.join(args.out_dir, args.png)
-    json_path = os.path.join(args.out_dir, args.json)
+    json_path = os.path.join(args.out_dir, args.json or "lead-checks.json")
     try:
         with open(args.svg, "r", encoding="utf-8") as fh:
             svg_text = fh.read()
