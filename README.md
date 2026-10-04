@@ -15,6 +15,14 @@ python -m unittest
 python cli.py --adapter generic --input examples/fake_log.ndjson --out out/example
 ```
 
+The last line the second command prints is the run's fingerprint. It should be exactly:
+
+```
+core_sha256: 431fd161c70335d1d596a2fb4fabb9a523cab7593406e493e610b48b90c4af92
+```
+
+`.gitattributes` keeps every text file at LF line endings in every checkout, so a Windows clone made with `core.autocrlf=true` reads the same example bytes as a Linux or Mac clone. `tests/test_example_pinned.py` pins the example's SHA-256 and checks that a run still prints the value above.
+
 Then open `out/example/report.html` in a browser. It works offline, with no scripts and no external files. Tested on Python 3.12, on Windows. The example log is **made up**: 14 lines, 5 invented agents and one human speaker.
 
 ## Run it on the German wiki data
