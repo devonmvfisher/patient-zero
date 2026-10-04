@@ -17,10 +17,11 @@ Python standard library only. Two outputs:
 ``lead.svg`` (only with ``--svg``, normally ``docs/lead.svg``)
     The lead tree alone, summary data only: no agent labels and no token text
     (the token is named by its class and token_id), page families, and minutes
-    since the first use, plus a line saying how the tree was picked and how
-    many trees chance alone would let through (``selection_lines``), so the
-    figure stays honest when shown on its own. Meant to be committed and shown
-    in the README.
+    since the first use, plus lines saying how the tree was picked, how many
+    trees chance alone would let through, and the whole run against the label
+    shuffle and (with a matching checks.json) the order null
+    (``selection_lines``), so the figure stays honest when shown on its own.
+    Meant to be committed and shown in the README.
 
 Both are built from three files a run writes to its output folder:
 facts.json, trees.jsonl and top_trees.json. top_trees.json holds node-level
@@ -913,8 +914,58 @@ def chance_verdict(f5):
     return word, text
 
 
-def selection_lines(rule, facts):
-    """One or two short lines saying how the drawn tree was picked, for inside the figure itself."""
+def chance_word(observed, p05, p95):
+    """'above chance' over the 95th percentile, 'below chance' under the 5th, else 'within chance'."""
+    if observed > p95:
+        return "above chance"
+    if observed < p05:
+        return "below chance"
+    return "within chance"
+
+
+def checks_for(facts, checks):
+    """``checks`` (checks.json) when it belongs to this facts.json, else None.
+
+    Same rule as tools/facts_sheet.py: rows, kept tokens and observed named
+    links must all match, so an order-null line never sits beside the wrong run.
+    """
+    if not checks or not facts:
+        return None
+    pairs = (
+        (checks.get("rows"), (facts.get("load") or {}).get("rows")),
+        (checks.get("tokens"), (facts.get("tokens") or {}).get("kept_total")),
+        ((((checks.get("order_null") or {}).get("links_named")) or {}).get("observed"),
+         (((facts.get("slots") or {}).get("F4")) or {}).get("links_named")),
+    )
+    for have, want in pairs:
+        if have is None or want is None or have != want:
+            return None
+    return checks
+
+
+def whole_run_line(facts, checks=None):
+    """One line with the whole run against each bar, for inside the figure; None without a shuffle.
+
+    The figure shows one tree, so this line keeps the run's verdict next to it:
+    named links against the label shuffle and, when a matching checks.json is
+    given, against the order null.
+    """
+    f5 = ((facts or {}).get("slots") or {}).get("F5") or {}
+    if not f5.get("shuffles"):
+        return None
+    obs = f5["links_observed"]
+    line = "Whole run: %s named links; label shuffle mean %s (%s)" % (
+        _num(obs), _num(int(round(f5["links_expected_mean"]))),
+        chance_word(obs, f5["links_expected_p05"], f5["links_expected_p95"]))
+    on = ((checks_for(facts, checks) or {}).get("order_null") or {}).get("links_named")
+    if on and on.get("mean") is not None:
+        line += "; order null mean %s (%s)" % (_num(int(round(on["mean"]))),
+                                               chance_word(obs, on["p05"], on["p95"]))
+    return line + "."
+
+
+def selection_lines(rule, facts, checks=None):
+    """Short lines saying how the drawn tree was picked, and the whole run's verdict, for inside the figure."""
     nm = (facts or {}).get("nullmodel") or {}
     if rule == RULE_BEAT and nm.get("shuffles"):
         first = ("Picked as the largest of %s trees that beat every shuffle; chance alone allows up to %s such "
@@ -922,16 +973,22 @@ def selection_lines(rule, facts):
                                       _num(nm["tokens"])))
         beyond = beats_beyond_chance(nm)
         if beyond:
-            return [first, "More trees beat every shuffle than luck gives on average; luck alone gives %s or more "
-                           "with a chance of at most %s." % (_num(beyond[0]), _small(beyond[2]))]
-        return [first, "So it shows how the method draws a spread; it is not proof that spread beat chance."]
-    if rule == RULE_BEAT:
-        return ["Picked as the largest tree that beat every shuffle."]
-    if rule == RULE_LARGEST:
-        return ["Picked as the largest branch among trees with named links; no tree beat every shuffle."]
-    if rule == RULE_GIVEN:
-        return ["Picked by hand (--lead)."]
-    return []
+            lines = [first, "More trees beat every shuffle than luck gives on average; luck alone gives %s or more "
+                            "with a chance of at most %s." % (_num(beyond[0]), _small(beyond[2]))]
+        else:
+            lines = [first, "So it shows how the method draws a spread; it is not proof that spread beat chance."]
+    elif rule == RULE_BEAT:
+        lines = ["Picked as the largest tree that beat every shuffle."]
+    elif rule == RULE_LARGEST:
+        lines = ["Picked as the largest branch among trees with named links; no tree beat every shuffle."]
+    elif rule == RULE_GIVEN:
+        lines = ["Picked by hand (--lead)."]
+    else:
+        lines = []
+    whole = whole_run_line(facts, checks)
+    if whole:
+        lines.append(whole)
+    return lines
 
 
 def render_report(facts, records, detail, lead=None):
@@ -1175,11 +1232,13 @@ def write_report(out_dir, facts, records, detail, lead=None):
     return path
 
 
-def public_svg(detail, lead=None, facts=None):
+def public_svg(detail, lead=None, facts=None, checks=None):
     """The lead tree as a standalone SVG: summary data only (no agent labels, no token text).
 
-    With ``facts`` the figure also says how the tree was picked and how many
-    trees chance alone would let through (``selection_lines``).
+    With ``facts`` the figure also says how the tree was picked, how many
+    trees chance alone would let through, and the whole run against the label
+    shuffle (``selection_lines``). With a matching ``checks`` (checks.json) the
+    whole-run line adds the order null.
     """
     tid = lead or detail["lead"]
     tree = _find(detail, tid)
@@ -1188,7 +1247,7 @@ def public_svg(detail, lead=None, facts=None):
                          "tree %s is not in top_trees.json" % short(tid, 20))
     rule = RULE_GIVEN if lead else detail["lead_rule"]
     return svg_tree(tree, detail["shuffles"], public=True, prefix="lead-", standalone=True,
-                    note_lines=selection_lines(rule, facts))
+                    note_lines=selection_lines(rule, facts, checks))
 
 
 def load_outputs(out_dir):
@@ -1216,6 +1275,8 @@ def main(argv=None, out=None):
     ap.add_argument("--out", required=True, help="the run folder (facts.json, trees.jsonl, top_trees.json)")
     ap.add_argument("--lead", help="token_id of the tree to lead with (must be in top_trees.json)")
     ap.add_argument("--svg", help="also write the lead tree here as a standalone SVG (summary data only)")
+    ap.add_argument("--checks", help="checks.json for the figure's order-null line (default: checks.json in --out, "
+                                     "used only when its counts match facts.json)")
     args = ap.parse_args(argv)
     try:
         facts, records, detail = load_outputs(args.out)
@@ -1224,9 +1285,18 @@ def main(argv=None, out=None):
         if args.svg:
             if not args.svg.lower().endswith(".svg"):
                 raise ValueError("--svg must name a .svg file")
+            checks_path = args.checks or os.path.join(args.out, "checks.json")
+            checks = None
+            if os.path.isfile(checks_path):
+                with open(checks_path, encoding="utf-8") as fh:
+                    checks = checks_for(facts, json.load(fh))
+                print("order null in the figure: %s" % ("yes, from checks.json" if checks else
+                                                         "no, checks.json counts differ from facts.json"), file=out)
+            elif args.checks:
+                raise ValueError("--checks file not found: %s" % args.checks)
             folder = os.path.dirname(os.path.abspath(args.svg))
             os.makedirs(folder, exist_ok=True)
-            _write_atomic(args.svg, public_svg(detail, lead=args.lead, facts=facts))
+            _write_atomic(args.svg, public_svg(detail, lead=args.lead, facts=facts, checks=checks))
             print("wrote: %s" % args.svg, file=out)
     except (OSError, ValueError) as exc:
         print("patient-zero report: ERROR: %s" % exc, file=out)

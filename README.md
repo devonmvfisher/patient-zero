@@ -1,12 +1,20 @@
 # patient-zero
 
-*Code docs drafted by Claude (Anthropic). The findings and the story are in the write-up, `WRITEUP.md`, which is the author's own text.*
+*Code docs drafted by Claude (Anthropic). The findings and the story are in the author's own write-up, which is submitted with the entry and is not part of these docs.*
 
 Give patient-zero a multi-agent log (who wrote what, when and where). It finds the tokens that several agents used, such as hosts, file names, code words, naming conventions and rare phrases. For each token it names the first user, links each later user to the most recent earlier use they could have seen, and draws the spread tree. Then it counts how many of those links a random relabelling of agents would also produce. It is Python standard library only and fully deterministic: no packages, no API keys, no network.
 
+**At a glance**
+
+- **What it claims:** a tracer that links each later user of a token to an earlier use they could have seen, and tests those links against chance. A link is a candidate, not proof that one agent copied another.
+- **The bar:** the same log with the agents shuffled, so the token set and the link rules stay the same. The planned bar is the label shuffle (agent labels permuted within each UTC day). The order null keeps each agent's own rows and only re-times them within the day; it is the fairer bar, added after the label shuffle's result (`patient_zero/checks.py`).
+- **German wiki run:** the links did not beat either bar. 28,250 named links against a label-shuffle mean of 45,188.7 (below chance, ratio 0.625) and an order-null mean of 28,377.9, sd 134.0 (within chance, ratio 0.995, z -0.95, 83 of 100 shuffles at or above). Per tree: 42 trees beat every label shuffle, where chance alone allows up to 76.
+- **Evidence that it can see spread:** planted known-answer tests find all 3 cascades planted in a made-up log, and no shuffle reaches the planted chain or star (`tests/test_planted.py`, `tests/test_nullmodel.py`). These logs are made up by us; the real wiki has no ground truth. A hand check of 10 random wiki links (`tools/peek.py`) found 2 plausible, 7 coincidence and 1 unclear.
+- **Blind spots:** it sees saves, not reads, and it cannot tell copying from a shared cause such as one instruction on a page. More under **Known limits** below.
+
 ![Lead spread tree from a run on the German wiki export](docs/lead.svg)
 
-*`docs/lead.svg`: one tree from a run on the German wiki export. It holds summary data only: no agent names and no token text. The figure itself says how the tree was picked and how many trees chance alone would let through.*
+*`docs/lead.svg`: one tree from a run on the German wiki export. It holds summary data only: no agent names and no token text. The figure itself says how the tree was picked, how many trees chance alone would let through, and how the whole run did against both bars.*
 
 ## Run it in two commands (no data needed)
 
@@ -25,7 +33,7 @@ core_sha256: a12a64ff8247d060ed455e65acd929d2a5fd4518884b14d04bc9534c754e58d5
 
 `.gitattributes` keeps every text file at LF line endings in every checkout, so a Windows clone made with `core.autocrlf=true` reads the same example bytes as a Linux or Mac clone. `tests/test_example_pinned.py` pins the example's SHA-256 and checks that a run still prints the value above.
 
-Then open `out/example/report.html` in a browser. It works offline, with no scripts and no external files. Tested on Python 3.12, on Windows.
+Then open `out/example/report.html` in a browser. It works offline, with no scripts and no external files. Tested on Python 3.12, on Windows (type `python3` where `python` is missing, as on many Macs and Linux machines). The example log is **made up**: 14 lines, 5 invented agents and one human speaker.
 
 ## Run it on the German wiki data
 
@@ -38,7 +46,7 @@ The data is **not** in this repo and never will be. It is the public export of t
 python cli.py --adapter wiki --input PATH/TO/collusion --out out/wiki
 ```
 
-A full run takes 1 to 5 minutes on one laptop. We measured 45 s to 299 s depending on machine load, against a 300 s target. `facts.json` records the SHA-256 of every input file, so two runs can be compared exactly. Runs are deterministic: the same input and seed give the same `core_sha256`.
+A full run takes about 1 to 5 minutes on one laptop. We measured 45 s on a quiet machine and up to 307 s under heavy load, against a 300 s target. `facts.json` records the SHA-256 of every input file, so two runs can be compared exactly. Runs are deterministic: the same input and seed give the same `core_sha256`.
 
 ## What a run writes
 
@@ -56,6 +64,8 @@ A full run takes 1 to 5 minutes on one laptop. We measured 45 s to 299 s dependi
 ```
 python -m patient_zero.report --out out/wiki --lead TOKEN_ID --svg docs/lead.svg
 ```
+
+The figure's order-null line comes from `out/wiki/checks.json` (see Robustness checks below). It is used only when its row, token and link counts match `facts.json`; otherwise the figure shows the label shuffle alone. Leave out `--lead` to keep the default lead tree.
 
 ## Your own log (generic adapter)
 
@@ -121,7 +131,7 @@ patient-zero: ERROR: examples/fake_log.csv has no column 'usr' (--map agent=usr)
 - **Report** (`report.py`). This writes `report.html` and `docs/lead.svg`. Every chart has a table view.
 - **Can it see, did it see** (`canisee.py`). This draws `docs/can-it-see.svg` from `calibration.json` (planted kinds scored on the real background, schema `pz-calibration/0` in the module docstring; nothing in this repo writes it yet) and `checks.json`. Every row sits on one axis, count ÷ order-null mean, with the null's 5th to 95th percentile as a grey band: planted carry, planted same-page spread (the order null's blind spot), a page-instruction decoy ("not run yet" until `calibration.json` has it), and the real wiki's pairs (named links) overall and across pages. It refuses to draw when the two files used different nulls. Run `python -m patient_zero.canisee --calibration out/wiki/calibration.json --checks out/wiki/checks.json --svg docs/can-it-see.svg`, then check it with `python tools/figcheck.py --svg docs/can-it-see.svg --sources out/wiki/calibration.json out/wiki/checks.json --out-dir out/wiki` (arithmetic only, no browser: every number against its JSON, one null on every row, dots and bands on the axis, position words, no z, the footer hashes, and text of at least 10 px on a 358 px phone).
 
-**Known limits.** A visit counts as exposure even if the token was deleted from the page before the visit. Visits are saves: a save's time is when its text was sent, not when the page was read, and by default the save that writes the token also counts as the visit (`checks.py` shows the counts without it). The row-level shuffle spreads an agent's saves over more pages and so makes more adopters. The report prints the adopter counts and the linked share next to the link counts, so you can see the size of that effect. Very fast spreads can be burst editing. Links are candidates, not proof: hand-check a sample before calling one spread.
+**Known limits.** It sees saves, not reads, and it cannot tell copying from a shared cause. Visits are saves: a save's time is when its text was sent, not when the page was read, and by default the save that writes the token also counts as the visit (`checks.py` shows the counts without it). If one instruction on a page tells every visitor to write a token, the links look like spread. A visit counts as exposure even if the token was deleted from the page before the visit. The order null keeps the pages each agent wrote a token on and only moves times within a day, so spread that stays on one page looks much the same under it as agents who just write the same token on that page. The log is all it sees: a token carried through another channel shows up as a parallel start, not a link. The row-level shuffle spreads an agent's saves over more pages and so makes more adopters. The report prints the adopter counts and the linked share next to the link counts, so you can see the size of that effect. Very fast spreads can be burst editing. Links are candidates, not proof: hand-check a sample before calling one spread.
 
 ## Tests
 
@@ -129,8 +139,7 @@ patient-zero: ERROR: examples/fake_log.csv has no column 'usr' (--map agent=usr)
 python -m unittest
 ```
 
-The suite runs in about 10 seconds. `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. The chat log is the one shipped as `examples/planted_chat.ndjson`, and `tests/test_demo.py` checks that file byte for byte and runs the demo command above. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`.
-The suite runs in about 10 seconds. `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`. The committed `docs/can-it-see.svg` is redrawn and checked only when `PZ_OUT` names the folder with its `calibration.json` and `checks.json`; with `PZ_DATA` and `PZ_TREES` (a run's `trees.jsonl`) also set, `tools/labelscan.py` checks that none of its visible words is an agent label or a token's text.
+The planted known-answer tests are the evidence that the tool can see spread: `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. The suite runs in about 10 seconds. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`.
 
 ## Data handling
 

@@ -209,6 +209,33 @@ class ExampleReport(unittest.TestCase):
         code, text = run(R.main, ["--out", self.out, "--svg", os.path.join(self.tmp, "lead.png")])
         self.assertEqual(code, 2)
 
+    def test_figure_takes_the_order_null_only_from_a_matching_checks_file(self):
+        copy = os.path.join(self.tmp, "with-checks")
+        shutil.copytree(self.out, copy)
+        f = self.facts
+        on = {"observed": f["slots"]["F4"]["links_named"], "mean": 1.0, "p05": 0.0, "p95": 2.0}
+        checks = {"rows": f["load"]["rows"], "tokens": f["tokens"]["kept_total"], "order_null": {"links_named": on}}
+        with open(os.path.join(copy, "checks.json"), "w", encoding="utf-8") as fh:
+            json.dump(checks, fh)
+        svg_path = os.path.join(copy, "lead.svg")
+        code, text = run(R.main, ["--out", copy, "--svg", svg_path])
+        self.assertEqual(code, 0, text)
+        self.assertIn("order null in the figure: yes", text)
+        with open(svg_path, encoding="utf-8") as fh:
+            self.assertIn("order null mean 1", fh.read())
+        checks["rows"] += 1
+        with open(os.path.join(copy, "checks.json"), "w", encoding="utf-8") as fh:
+            json.dump(checks, fh)
+        code, text = run(R.main, ["--out", copy, "--svg", svg_path])
+        self.assertEqual(code, 0, text)
+        self.assertIn("order null in the figure: no", text)
+        with open(svg_path, encoding="utf-8") as fh:
+            svg = fh.read()
+        self.assertNotIn("order null", svg)
+        self.assertIn("Whole run: ", svg)
+        code, text = run(R.main, ["--out", copy, "--svg", svg_path, "--checks", os.path.join(copy, "nope.json")])
+        self.assertEqual(code, 2)
+
 
 class Picking(unittest.TestCase):
     def test_lead_prefers_trees_that_beat_every_shuffle(self):
@@ -436,6 +463,39 @@ class Verdict(unittest.TestCase):
                                "chance_beats_upper_bound": 0.59, "tokens": 60}}
         self.assertIn("not proof", R._lead_text(R.RULE_BEAT, lucky))  # one lucky tree, bound 0.59
         self.assertIn("not proof", " ".join(R.selection_lines(R.RULE_BEAT, lucky)))
+
+    def test_chance_word_edges(self):
+        self.assertEqual(R.chance_word(10, 5, 9), "above chance")
+        self.assertEqual(R.chance_word(4, 5, 9), "below chance")
+        self.assertEqual(R.chance_word(9, 5, 9), "within chance")  # on the 95th percentile is still inside
+        self.assertEqual(R.chance_word(5, 5, 9), "within chance")
+
+    def test_whole_run_line_label_shuffle_and_order_null(self):
+        facts = {"load": {"rows": 14591}, "tokens": {"kept_total": 7671},
+                 "slots": {"F4": {"links_named": 28250}, "F5": f5(28250, 45188.72, 44684.25, 45632.2, 100)}}
+        checks = {"rows": 14591, "tokens": 7671,
+                  "order_null": {"links_named": {"observed": 28250, "mean": 28377.88, "p05": 28153.0,
+                                                 "p95": 28574.35}}}
+        self.assertEqual(R.whole_run_line(facts),
+                         "Whole run: 28,250 named links; label shuffle mean 45,189 (below chance).")
+        self.assertEqual(R.whole_run_line(facts, checks),
+                         "Whole run: 28,250 named links; label shuffle mean 45,189 (below chance); "
+                         "order null mean 28,378 (within chance).")
+        for key, bad in (("rows", 1), ("tokens", 1)):
+            wrong = dict(checks, **{key: bad})
+            self.assertIsNone(R.checks_for(facts, wrong))
+            self.assertNotIn("order null", R.whole_run_line(facts, wrong))
+        wrong = {"rows": 14591, "tokens": 7671, "order_null": {"links_named": {"observed": 1, "mean": 1.0,
+                                                                                 "p05": 0.0, "p95": 2.0}}}
+        self.assertIsNone(R.checks_for(facts, wrong))
+        self.assertIsNone(R.whole_run_line({"slots": {"F5": f5(1, 1.0, 1.0, 1.0, 0, shuffles=0)}}))
+        self.assertIsNone(R.whole_run_line(None))
+        lines = R.selection_lines(R.RULE_BEAT, dict(facts, nullmodel={
+            "shuffles": 100, "trees_beating_every_shuffle": 42, "chance_beats_upper_bound": 75.95,
+            "tokens": 7671}), checks)
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[2].startswith("Whole run: 28,250 named links"))
+        self.assertIn("order null mean 28,378 (within chance)", lines[2])
 
     def test_note_lines_sit_in_the_public_figure(self):
         d = detail([node(0, 0, "a", "first"), node(1, 5, "a", "linked", 0), node(2, 9, "a", "linked", 1)])
