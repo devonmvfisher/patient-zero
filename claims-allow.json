@@ -335,6 +335,156 @@
    "at": "agents on {} invented boards",
    "from": "{code:tools/can_it_see.py:DEMO_PLACES}",
    "reason": "invented boards in the made-up demo log (pinned by tests/test_can_it_see.py)"
+  },
+  {
+   "file": "README.md",
+   "at": "so {} is what the test expects",
+   "text": "1",
+   "reason": "the ratio at which a count equals the order-null mean; it marks the axis, it is not a finding"
+  },
+  {
+   "file": "README.md",
+   "at": "largest of the {} trees that beat",
+   "from": "{wiki.facts:nullmodel.trees_beating_every_shuffle}",
+   "reason": "trees whose named links beat every label shuffle (the lead figure's own line)"
+  },
+  {
+   "file": "README.md",
+   "at": "allows up to {} such trees. It holds",
+   "from": "{wiki.facts:nullmodel.chance_beats_upper_bound}",
+   "reason": "how many such trees chance alone allows (the lead figure's own line)"
+  },
+  {
+   "file": "README.md",
+   "at": "| {} tokens, each on",
+   "from": "{wiki.calibration:controls.random_400.tokens}",
+   "reason": "tokens in the random-row control the figure draws (crossgrid random_c2)"
+  },
+  {
+   "file": "README.md",
+   "at": "each on {} random agent rows",
+   "text": "10",
+   "reason": "rows per token in the random-row controls (patient_zero/crossgrid.py RANDOM_CONTROLS; fixed in docs/prereg/PREREG-PZ5.txt)"
+  },
+  {
+   "file": "README.md",
+   "at": "real tokens, {} independent draws",
+   "from": "{wiki.calibration:detection_limit.replicates}",
+   "reason": "independent plant draws in the detection-limit run"
+  },
+  {
+   "file": "README.md",
+   "at": "Caught in all {} draws from",
+   "from": "{wiki.calibration:detection_limit.replicates}",
+   "reason": "independent plant draws in the detection-limit run"
+  },
+  {
+   "file": "README.md",
+   "at": "draws from {} cascades up (a median",
+   "from": "{wiki.calibration:detection_limit.aggregate.k}",
+   "reason": "the minimum detectable carry on all pairs, in cascades"
+  },
+  {
+   "file": "README.md",
+   "at": "missed in all {} at",
+   "from": "{wiki.calibration:detection_limit.replicates}",
+   "reason": "independent plant draws in the detection-limit run"
+  },
+  {
+   "file": "README.md",
+   "at": "missed in all 5 at {} |",
+   "from": "{wiki.calibration:detection_limit.aggregate.missed_by_every_draw.k}",
+   "reason": "the largest size every draw missed, in cascades"
+  },
+  {
+   "file": "README.md",
+   "at": "| {} random links read from",
+   "text": "10",
+   "reason": "hand-check marks by a Claude reader seat on 10 random links drawn by tools/peek.py (2 plausible, 7 coincidence, 1 unclear; the marks file is a run output, outside the repo)"
+  },
+  {
+   "file": "README.md",
+   "at": "not by a person | {} plausible",
+   "text": "2",
+   "reason": "hand-check marks by a Claude reader seat on 10 random links drawn by tools/peek.py (2 plausible, 7 coincidence, 1 unclear; the marks file is a run output, outside the repo)"
+  },
+  {
+   "file": "README.md",
+   "at": "plausible, {} coincidence, 1 unclear |",
+   "text": "7",
+   "reason": "hand-check marks by a Claude reader seat on 10 random links drawn by tools/peek.py (2 plausible, 7 coincidence, 1 unclear; the marks file is a run output, outside the repo)"
+  },
+  {
+   "file": "README.md",
+   "at": "7 coincidence, {} unclear |",
+   "text": "1",
+   "reason": "hand-check marks by a Claude reader seat on 10 random links drawn by tools/peek.py (2 plausible, 7 coincidence, 1 unclear; the marks file is a run output, outside the repo)"
+  },
+  {
+   "file": "README.md",
+   "at": "a limit at {} cascades on all pairs",
+   "text": "80",
+   "reason": "the prediction written in docs/prereg/PREREG-PZ4.txt before the run (pinned by tests/test_prereg.py)"
+  },
+  {
+   "file": "README.md",
+   "at": "the run measured {}. On cross-page",
+   "from": "{wiki.calibration:detection_limit.aggregate.k}",
+   "reason": "the minimum detectable carry on all pairs, in cascades"
+  },
+  {
+   "file": "README.md",
+   "at": "it predicted {} or more",
+   "text": "100",
+   "reason": "the prediction written in docs/prereg/PREREG-PZ4.txt before the run (pinned by tests/test_prereg.py)"
+  },
+  {
+   "file": "README.md",
+   "at": "the run measured {} |",
+   "from": "{wiki.calibration:detection_limit.cross_page.k}",
+   "reason": "the minimum detectable carry on cross-page pairs alone, in cascades"
+  },
+  {
+   "file": "README.md",
+   "at": "Its {}-token random-row control",
+   "from": "{wiki.calibration:controls.random_400.tokens}",
+   "reason": "tokens in the pre-registered random-row control (crossgrid random_c2)"
+  },
+  {
+   "file": "README.md",
+   "at": "an unbiased test reads {},",
+   "text": "1",
+   "reason": "the ratio at which a count equals the order-null mean, which a control with no spread reads when the test is unbiased; not a finding"
+  },
+  {
+   "file": "README.md",
+   "at": "to another from {} planted cascades up",
+   "from": "{wiki.calibration:detection_limit.aggregate.k}",
+   "reason": "the minimum detectable carry on all pairs, in cascades (first screen)"
+  },
+  {
+   "file": "README.md",
+   "at": "and misses it at {}.",
+   "from": "{wiki.calibration:detection_limit.aggregate.missed_by_every_draw.k}",
+   "reason": "the largest size every draw missed, in cascades (first screen)"
+  },
+  {
+   "file": "README.md",
+   "at": "read {} and 0.858 of its mean",
+   "from": "{wiki.calibration:controls.random_400.all_links.ratio}",
+   "reason": "the random-row control on all pairs, observed / order-null mean (first screen)"
+  },
+  {
+   "file": "README.md",
+   "at": "read 0.930 and {} of its mean",
+   "from": "{wiki.calibration:controls.random_400.cross_page.ratio}",
+   "reason": "the random-row control on cross-page pairs, observed / order-null mean (first screen)"
+  },
+  {
+   "file": "README.md",
+   "at": "wiki's own reading ({})",
+   "from": "{wiki.checks:order_null.links_named.ratio}",
+   "reason": "named links on the real wiki, observed / order-null mean (first screen)"
   }
  ]
 }

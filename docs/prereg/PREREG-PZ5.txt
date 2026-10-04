@@ -1,0 +1,81 @@
+KM RED-TEAM RUN "PZ-5: is the one negative result broad, or one class, or one horizon?" -- PRE-REG PZ5 v1
+Written Sat 2026-10-03 by the kirk/ideas PZ-5 agent, AFTER E7b and E7c (kirk/cards/km-run) and BEFORE any grid
+number was computed. Code under test: a sandbox copy of patient-zero ea867f1 plus the new module written for
+this run (patient_zero/crossgrid.py). sha256 of this file is stored in the results file and in PREREG-PZ5.sha256.
+
+RULE WRITTEN FIRST (the headline does not move):
+  The headline cross-page verdict stays exactly as pre-registered in PREREG-v2 (E7b): cross-page named links
+  5,737 vs order null 6,262.93 (sd 129.276), ratio 0.916, z -4.07, 0 of 100 shuffles at or below, verdict
+  "below the order null", quoted only with E7c beside it and labelled "chosen after E7". Nothing in this grid
+  changes that verdict, its wording or its numbers, whatever the grid shows. The grid only says whether the
+  result is broad or driven by one token class, and whether it depends on an exposure horizon.
+
+PREMISE CORRECTION (found by reading code, before any number):
+  The task text calls 72 h "the default exposure horizon" and expects "5,737 at 72 h". The tracer has NO
+  exposure horizon: nullmodel.count_links credits the most recent visible earlier use with no age limit. 72 h
+  is the horizon of the PLANTED generators (max/prong-b exp.py / exp2.py, kirk/cards/km-run). So 5,737 is the
+  no-horizon count. This run therefore reports FOUR horizon columns: 24 h, 72 h, 7 d (the task's three) and
+  "none" (the shipped default, which is what E7b measured). The reproduction test is applied to "none". The
+  72 h column is reported as computed; it equals 5,737 only if no cross-page link is older than 72 h.
+  Known before this run (from CHECKPOINT J4): median link lag over ALL 28,250 links is 583 s. The lag
+  distribution of cross-page links was NOT looked at before writing this file.
+
+HORIZON (one definition, fixed here):
+  link lag = time of the adopter's first use F minus time of the credited source use U (the row the cascade
+  credits; most recent visible earlier use). A named link counts at horizon H iff lag <= H seconds.
+  24 h = 86,400 s; 72 h = 259,200 s; 7 d = 604,800 s; none = no limit. Because U is the most recent qualifying
+  use, no older use can qualify when U is too old, so the filter never changes who is credited: cells nest
+  (24 h <= 72 h <= 7 d <= none) in the real count and in every shuffle. The same filter is applied to every
+  shuffle, on that shuffle's own times.
+
+STATISTIC: cross-page named links (credited source row on a different page from the adopter's first-use row),
+  per token class and per horizon. Same-page links reported beside, no pass line.
+CLASSES: the tracer's six classes: host, file, code, phrase, convention (the task's five) and command (1 token
+  in the real data, kept as its own sixth row so the class cells still sum to the total). Convention kinds are
+  not split.
+NULL: N3 order null, agent-day scope, 100 shuffles, one random.Random(20261003): the same permutations as
+  checks.json, E7, E7b and E7c (reorder's random draws do not depend on the token set).
+
+CELL READING (the PREREG-v2 V rule, applied per cell, descriptive only):
+  "above" if z >= 3 and at most 1 of 100 shuffles >= observed; "below" if z <= -3 and at most 1 of 100 shuffles
+  <= observed; otherwise "at chance". z is None (no spread) reads "at chance (no spread)".
+
+BREADTH READING per horizon (descriptive only; primary column = none):
+  L = the class with the largest null-mean cross-page count in the "none" column (predicted: phrase); kept the
+  same at every horizon. REST = all other classes pooled (sum per shuffle). R = total observed / total null mean.
+  z_null = (obs_rest - mean_rest) / sd_rest. z_prop = (obs_rest - R * mean_rest) / sd_rest (how far REST is from
+  a shortfall proportional to the total's).
+  Evaluated in this order, first match wins (z None counts as 0):
+    1 REST above chance        : z_null >= 2
+    2 REST carries more        : z_prop <= -2
+    3 broad                    : z_null <= -2 and |z_prop| < 2
+    4 partly broad             : z_null <= -2 and z_prop >= 2    (REST below chance, but less than proportional)
+    5 driven by L              : z_prop >= 2                      (REST at chance, and away from proportional)
+    6 undetermined (low power) : otherwise (|z_null| < 2 and |z_prop| < 2)
+  Also a drop-one table: the total minus each class in turn, with the V reading.
+
+CONTROLS per horizon (random rows: no structure, so an unbiased statistic gives |z| < 2):
+  C1 (primary, E7c-style): 40 tokens x 10 distinct agent rows, rng random.Random(20261031), rng.sample over agent
+     rows in load order (exactly E7c "random"). Expected to reproduce E7c at "none": 29 vs 26.08, sd 3.401, z 0.86.
+  C2 (secondary, new, chosen now): 400 tokens x 10 agent rows, rng random.Random(20261041), same sampler.
+  A horizon is CALIBRATED only if C1 and C2 both give |z| < 2 on cross-page links (z None counts as a pass
+  only when the control's observed equals its null mean; otherwise a fail). Any fail marks that horizon
+  "uncalibrated" and its cells are reported with that mark. Known cost: with two controls a horizon is marked
+  uncalibrated by chance about 9% of the time (conservative direction).
+  K (power, reported, no pass line on the grid): the 40 planted carry cascades of E7b/E7c (exp2 generator,
+     rng 20261023, carry_p 1.0, q 0.35, cap 40, 72 h generator horizon). Cross-page z per horizon; z >= 3 =
+     "powered at this horizon". A horizon without power cannot call any cell "at chance" evidence of absence.
+
+PASS LINES (the task's test, with the premise correction):
+  T1 class cells (6 classes) sum to the pooled cross-page total at every horizon, in the observed count and in
+     every shuffle. Else STOP.
+  T2 the "none" column reproduces E7b: cross 5,737, same 22,513, null mean 6,262.93 and sd 129.276 (within
+     0.01 / 0.001), z -4.07. Else STOP.
+  T3 nesting: 24 h <= 72 h <= 7 d <= none, observed and every shuffle, every class. Else STOP (code bug).
+  T4 C1 reproduces E7c at "none" (29; 26.08; 3.401; 0.86). A mismatch is reported, not a STOP.
+  T5 every horizon is calibrated (C1 and C2 |z| < 2), or that horizon is marked uncalibrated.
+PREDICTIONS (not pass lines): phrase carries most cross-page links; most cross-page links are younger than 24 h,
+  so the four columns differ little; breadth reading at "none" is "broad" or "undetermined (low power)".
+NO FORKING: one run, 100 shuffles, seed 20261003; no rerun with another horizon set, class grouping, seed, control
+  size or definition to improve any cell. A code bug found after the run is fixed in the open and the rerun is
+  labelled with the reason.

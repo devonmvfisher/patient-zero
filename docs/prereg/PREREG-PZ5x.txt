@@ -1,0 +1,32 @@
+KM RED-TEAM RUN "PZ-5x: what does the cross-page statistic read on structureless tokens shaped like ours?" -- PRE-REG PZ5x
+Written Sat 2026-10-03 by the kirk/ideas PZ-5 agent, AFTER the PZ-5 run (pz5-results.json) and BEFORE any PZ-5x
+number. EXPLORATORY, CHOSEN AFTER PZ-5 NUMBERS, labelled so. It changes no headline and no PZ-5 cell.
+
+WHY (known from PZ-5, in the open): the pre-registered secondary random-row control C2 (400 tokens x 10 agent rows)
+reads cross-page z -4.63 / -4.38 / -3.99 / -4.00 at 24 h / 72 h / 7 d / none (ratio 0.80 to 0.86), so every horizon
+is marked uncalibrated: the order null reads structureless tokens BELOW chance on cross-page links. C1 (40 tokens,
+E7c's set) passed at z 0.86 because it was small. C2's tokens are not shaped like real tokens (10 rows, ~10
+distinct agents each), so C2's ratio is not the right baseline for the real ratio 0.916. This run builds the
+baseline that is.
+
+CONTROL M (agent-preserving random rows): for each real token (sorted key order) and each agent among its agent
+use rows (exposure-only use rows dropped), draw that agent's number of use rows uniformly without replacement from
+ALL of that agent's own agent rows (any page, any day). Same class as the real token. Ten replicates r = 0..9,
+each with random.Random(20261061 + r). So each control token keeps who used it and how often; only which of each
+agent's rows carry it is random: no copying, no shared page cause.
+NULL: N3 order null, agent-day scope, 30 shuffles, random.Random(20261003): the first 30 permutations of the PZ-5
+run (same draw sequence). The real cells are recomputed on these 30 shuffles beside the controls.
+STATISTIC: cross-page named links per class and pooled, per horizon (24 h, 72 h, 7 d, none), as PZ-5.
+
+READING (descriptive only), per class and pooled, per horizon:
+  R_real = real observed / real null mean (30 shuffles). R_m,r = replicate r observed / its null mean.
+  z_cal = (R_real - mean_r R_m,r) / sd_r R_m,r (10 replicates).
+    |z_cal| < 2  : "at the structureless baseline"
+    z_cal <= -2  : "below the structureless baseline"
+    z_cal >= 2   : "above the structureless baseline"
+  Also reported: mean and range of R_m,r, and how many of the 10 replicates read "below" by the V rule
+  (z <= -3 and at most 1 of 30 shuffles at or below; with 30 shuffles that is "none at or below").
+  sd_r R_m,r of 0 or a class with no cross-page links in a replicate: "undetermined".
+PREDICTION (not a pass line): pooled R_m between 0.85 and 0.93, so the real pooled cross-page reads "at the
+  structureless baseline" at every horizon.
+NO FORKING: one run; no other replicate count, seed, shuffle count, sampler or matching rule.
