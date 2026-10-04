@@ -33,7 +33,7 @@ core_sha256: a12a64ff8247d060ed455e65acd929d2a5fd4518884b14d04bc9534c754e58d5
 
 `.gitattributes` keeps every text file at LF line endings in every checkout, so a Windows clone made with `core.autocrlf=true` reads the same example bytes as a Linux or Mac clone. `tests/test_example_pinned.py` pins the example's SHA-256 and checks that a run still prints the value above.
 
-Then open `out/example/report.html` in a browser. It works offline, with no scripts and no external files. Tested on Python 3.12, on Windows (type `python3` where `python` is missing, as on many Macs and Linux machines). The example log is **made up**: 14 lines, 5 invented agents and one human speaker.
+Then open `out/example/report.html` in a browser. It works offline, with no scripts and no external files. Tested on Python 3.12, on Windows (type `python3` where `python` is missing, as on many Macs and Linux machines).
 
 ## Run it on the German wiki data
 

@@ -97,7 +97,7 @@ if REPO_DIR not in sys.path:
 from patient_zero.safe import short  # noqa: E402
 
 ALLOW_NAME = "claims-allow.json"
-EXAMPLE_LOG = os.path.join("examples", "fake_log.ndjson")
+EXAMPLE_LOG = os.path.join("examples", "planted_chat.ndjson")
 RUN_FILES = ("facts", "checks", "calibration", "lead")
 SOURCE_RANK = {name: i for i, name in enumerate(RUN_FILES)}
 ENTRY_KEYS = {"file", "at", "text", "from", "reason"}
