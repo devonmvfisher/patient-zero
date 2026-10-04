@@ -44,7 +44,7 @@ if ROOT not in sys.path:
 from patient_zero.safe import guard_out  # noqa: E402
 
 SCHEMA = "pz-calibration/0"
-FIELDS = ("observed", "mean", "sd", "p05", "p95", "shuffles_ge_observed", "shuffles_le_observed")
+FIELDS = ("observed", "mean", "sd", "p05", "p95", "ratio", "shuffles_ge_observed", "shuffles_le_observed")
 SPLIT_TOL = 0.011  # two means rounded to 0.01 can miss their rounded sum by 0.01
 HORIZON = "none"  # the shipped rule: no exposure horizon (crossgrid's column that equals the tracer)
 

@@ -95,9 +95,10 @@ class Build(unittest.TestCase):
     def test_canisee_draws_every_row_from_it(self):
         doc = M.build(calibrate_doc(), crossgrid_doc(), checks_doc())
         rows = C.build_rows(doc, checks_doc())
-        self.assertEqual([r["status"] for r in rows], ["drawn"] * 5)
+        self.assertEqual([r["status"] for r in rows], ["drawn"] * 6)
         self.assertEqual([r["row"].key for r in rows],
-                         ["carry", "same_page", "page_instruction", "real_all", "real_cross"])
+                         ["carry", "same_page", "page_instruction", "real_all", "real_cross", "random_cross"])
+        self.assertEqual(rows[-1]["verdict"], "below the band: biased low")
         svg = C.draw(doc, checks_doc(), {"calibration.json": "0" * 64, "checks.json": "1" * 64})
         self.assertIn("<svg", svg)
 

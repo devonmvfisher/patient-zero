@@ -21,7 +21,11 @@ accent dot. Rows:
       holds ``planted.page_instruction``.
 * Did it see? (the real wiki)
     - all links (from checks.json);
-    - cross-page links (from calibration.json).
+    - cross-page links (from calibration.json);
+    - the no-spread control for that row: random rows scored the same way
+      (``controls.random_400.cross_page``), drawn as "not run yet" until
+      calibration.json holds it. Inside the band reads "unbiased"; outside it
+      reads "biased", and then the real row beside it is not evidence either way.
 
 Every row must use the same null, or nothing is drawn: the null id built
 from each file's null fields must match, calibration.json's ``null.h0``
@@ -96,11 +100,14 @@ ROWS = (
         "decoy: the page tells every writer", False),
     Row("real_all", "did", "checks.json", ("order_null", "links_named"), "real wiki: all pairs", True),
     Row("real_cross", "did", "calibration.json", ("real", "cross_page"), "real wiki: cross-page pairs", True),
+    Row("random_cross", "did", "calibration.json", ("controls", "random_400", "cross_page"),
+        "control: random rows, cross-page", False),
 )
 SECTIONS = (("can", "Can it see? Planted on the real wiki"), ("did", "Did it see? The real wiki"))
 WORDS = {
     "contact": {"above": "seen", "inside": "blind spot", "below": "reads the wrong way"},
     "decoy": {"above": "wrongly flagged", "inside": "not flagged", "below": "not flagged"},
+    "control": {"above": "biased high", "inside": "unbiased", "below": "biased low"},
     "real": {},
 }
 CELL_KEYS = ("observed", "mean", "p05", "p95")
@@ -153,6 +160,11 @@ def where(observed, p05, p95):
 
 
 def role_of(row, calibration):
+    if row.path[0] == "controls":  # tokens with no structure, scored like the real data beside them
+        kind = _get(calibration, row.path[:2]) or {}
+        if kind.get("contact") is not False:
+            raise CanISeeError("calibration.json %s must say contact: false" % ".".join(row.path[:2]))
+        return "control"
     if row.section == "did":
         return "real"
     kind = _get(calibration, row.path[:2]) or {}

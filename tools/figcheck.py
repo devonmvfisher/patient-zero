@@ -98,8 +98,9 @@ DATA_PLANNED = {
     "hashes_match": "every hash printed is the SHA-256 prefix of the source file named beside it, and every "
                     "source's hash is printed",
     "phone_check": "smallest font px x %d / canvas width >= %g" % (PHONE_WIDTH, PHONE_MIN_PX),
-    "rows_complete": "the five rows are there in order (carry, same-page, decoy, real all, real cross-page); only the "
-                     "decoy may be pending or left out, and only while its source has no numbers",
+    "rows_complete": "the six rows are there in order (carry, same-page, decoy, real all, real cross-page, random-row "
+                     "control); only the decoy and the control may be pending or left out, and only while their "
+                     "source has no numbers",
 }
 # Rows of docs/can-it-see.svg, in order: (key, source, JSON path, may be missing).
 DATA_ROWS = (
@@ -108,6 +109,7 @@ DATA_ROWS = (
     ("page_instruction", "calibration.json", "planted.page_instruction.all_links", True),
     ("real_all", "checks.json", "order_null.links_named", False),
     ("real_cross", "calibration.json", "real.cross_page", False),
+    ("random_cross", "calibration.json", "controls.random_400.cross_page", True),
 )
 GEOM_TOL = 0.11  # px: coordinates are written to 0.1
 MIN_BAND = 2.0  # px: a narrower band is drawn this wide, centred
@@ -118,6 +120,7 @@ Z_RE = re.compile(r"(?i)(?<![a-z])(?:z|sd|sigma|std|z-score|stdev)(?![a-z])|σ")
 POSITION_WORDS = {
     "contact": {"above": "seen", "inside": "blind spot", "below": "reads the wrong way"},
     "decoy": {"above": "wrongly flagged", "inside": "not flagged", "below": "not flagged"},
+    "control": {"above": "biased high", "inside": "unbiased", "below": "biased low"},
     "real": {},
 }
 CELL_KEYS = ("observed", "mean", "p05", "p95")
@@ -437,6 +440,9 @@ def _texts(el):
 
 def _role_expected(row, sources):
     path = row.get("data-path", "")
+    if path.startswith("controls."):
+        kind = _resolve(sources.get(row.get("data-source")) or {}, ".".join(path.split(".")[:2])) or {}
+        return "control" if kind.get("contact") is False else None
     if not path.startswith("planted."):
         return "real"
     kind = _resolve(sources.get(row.get("data-source")) or {}, ".".join(path.split(".")[:2])) or {}

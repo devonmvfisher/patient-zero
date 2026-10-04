@@ -243,12 +243,12 @@
    "reason": "every agent of the lead tree is drawn"
   },
   {
-   "file": "docs/*.svg",
+   "file": "docs/lead.svg",
    "at": "^{} h$",
    "reason": "time-axis tick labels, one every 2 hours; they mark the axis, they are not findings"
   },
   {
-   "file": "docs/*.svg",
+   "file": "docs/lead.svg",
    "at": "^{}$",
    "text": "0",
    "reason": "the time-axis tick at the first use (0); it marks the axis, it is not a finding"
@@ -312,6 +312,11 @@
    "at": "\"time\": \"{}\", \"place\"",
    "text": "2026-01-10T09:00:00Z",
    "reason": "made-up time in the format example line (examples/fake_log.ndjson, line 1)"
+  },
+  {
+   "file": "docs/can-it-see.svg",
+   "at": "^{}$",
+   "reason": "tick labels on the can-it-see figure's one ratio axis; they mark the axis, they are not findings (tools/figcheck.py --sources checks each tick sits at its value)"
   }
  ]
 }
