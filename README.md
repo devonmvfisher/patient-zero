@@ -12,18 +12,20 @@ Give patient-zero a multi-agent log (who wrote what, when and where). It finds t
 
 ```
 python -m unittest
-python cli.py --adapter generic --input examples/fake_log.ndjson --out out/example
+python cli.py --adapter generic --input examples/planted_chat.ndjson --out out/example
 ```
+
+The example log is **made up**, and it has a known answer. It holds 20 chat lines from 13 invented agents, with three planted cascades: a chain (Ada, Bram, Cleo, Dax), a star (Eve to Finn, Gus and Hal) and a chain whose second user posts inside the clock uncertainty, so the effective seed is not the first user. The answer key is `PLANTED` in `tests/test_planted.py`. The run should print `against the shuffle: above chance`, and the report's lead tree is the planted chain. `tests/test_demo.py` checks both, parent for parent.
 
 The last line the second command prints is the run's fingerprint. It should be exactly:
 
 ```
-core_sha256: 431fd161c70335d1d596a2fb4fabb9a523cab7593406e493e610b48b90c4af92
+core_sha256: a12a64ff8247d060ed455e65acd929d2a5fd4518884b14d04bc9534c754e58d5
 ```
 
 `.gitattributes` keeps every text file at LF line endings in every checkout, so a Windows clone made with `core.autocrlf=true` reads the same example bytes as a Linux or Mac clone. `tests/test_example_pinned.py` pins the example's SHA-256 and checks that a run still prints the value above.
 
-Then open `out/example/report.html` in a browser. It works offline, with no scripts and no external files. Tested on Python 3.12, on Windows. The example log is **made up**: 14 lines, 5 invented agents and one human speaker.
+Then open `out/example/report.html` in a browser. It works offline, with no scripts and no external files. Tested on Python 3.12, on Windows.
 
 ## Run it on the German wiki data
 
@@ -65,6 +67,8 @@ Write JSON Lines (`.jsonl` or `.ndjson`, gzipped or not), one event per line:
 
 - **Required:** `agent`, `time` (an ISO-8601 string, where no zone means UTC, or POSIX seconds), `place` (a page, room or channel) and `text`.
 - **Optional:** `id`, `group`, `family` (used for colours and the flow table), `uncertainty_seconds`, `time_grade`, and `human: true` for a human speaker.
+
+`examples/fake_log.ndjson` is a second made-up log in this format (14 lines, 5 invented agents and one human speaker) that uses the optional fields.
 
 Human speakers and blank labels are exposure-only: others can see what they wrote, but they are never named and never credited. If you have a shared goal or prompt text, pass it with `--given FILE`: tokens from it are dropped, because they were handed down, not spread. `python cli.py --help` lists every option.
 
@@ -121,7 +125,7 @@ patient-zero: ERROR: examples/fake_log.csv has no column 'usr' (--map agent=usr)
 python -m unittest
 ```
 
-The suite runs in about 10 seconds. `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`.
+The suite runs in about 10 seconds. `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. The chat log is the one shipped as `examples/planted_chat.ndjson`, and `tests/test_demo.py` checks that file byte for byte and runs the demo command above. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`.
 
 ## Data handling
 

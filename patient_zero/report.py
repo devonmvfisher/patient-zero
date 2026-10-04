@@ -790,14 +790,72 @@ def _find(detail, tid):
     return next((t for t in detail["trees"] if t["token_id"] == tid), None)
 
 
+def beat_bound(nm):
+    """tokens / (shuffles + 1): the most trees that beat every shuffle by luck, on average.
+
+    Recomputed from the counts when they are there, because facts.json rounds it
+    to 2 places, and a small run must never read "up to 0.0 trees".
+    """
+    if nm.get("shuffles") and nm.get("tokens") is not None:
+        return nm["tokens"] / (nm["shuffles"] + 1)
+    return nm.get("chance_beats_upper_bound")
+
+
+def _small(x):
+    """A probability or bound under 1 to 2 significant figures, never in e-notation."""
+    text = "%.2g" % x
+    if "e" in text:
+        text = ("%.10f" % float(text)).rstrip("0").rstrip(".")
+    return text
+
+
+def bound_text(bound):
+    """The chance bound as printed: whole from 10, 1 decimal from 1, 2 decimals under 1.
+
+    Under 1 it never prints "0.0" or "0.00": a bound that small gets 2
+    significant figures instead (0.003).
+    """
+    if bound is None:
+        return "n/a"
+    if bound >= 10:
+        return _num(int(round(bound)))
+    if bound >= 1:
+        return _num(float(bound))
+    text = "%.2f" % bound
+    if text == "0.00" and bound > 0:
+        text = _small(bound)
+    return text
+
+
+def beats_beyond_chance(nm):
+    """(beats, bound, luck) when more trees beat every shuffle than the chance bound, else None.
+
+    ``luck`` is bound / beats. Each tree beats all N shuffles by luck with
+    probability at most 1 / (N + 1), so the expected number of such trees is at
+    most ``bound``, and by Markov's inequality luck alone gives ``beats`` or more
+    of them with probability at most ``luck``. Only then does a caption drop its
+    "not proof" line; the number stays printed, so a narrow win reads as narrow.
+    """
+    beats, bound = nm.get("trees_beating_every_shuffle"), beat_bound(nm)
+    if not nm.get("shuffles") or beats is None or bound is None or beats <= bound:
+        return None
+    return beats, bound, bound / beats
+
+
 def _lead_text(rule, facts):
     nm = facts.get("nullmodel") or {}
     text = "How this tree was picked: %s." % rule
     if rule == RULE_BEAT and nm.get("shuffles"):
         text += (" %s trees beat every one of the %d shuffles; chance alone would let up to %s trees do that "
-                 "(tokens / (shuffles + 1)), so this tree shows how the method draws a spread, not proof "
-                 "that spread beat chance." % (_num(nm["trees_beating_every_shuffle"]), nm["shuffles"],
-                                               _num(nm["chance_beats_upper_bound"])))
+                 "(tokens / (shuffles + 1))" % (_num(nm["trees_beating_every_shuffle"]), nm["shuffles"],
+                                                bound_text(beat_bound(nm))))
+        beyond = beats_beyond_chance(nm)
+        if beyond:
+            text += (" on average, so luck alone gives %s or more with a chance of at most %s (Markov's "
+                     "inequality). Each named link is still a candidate: hand-check a sample before calling "
+                     "it spread." % (_num(beyond[0]), _small(beyond[2])))
+        else:
+            text += ", so this tree shows how the method draws a spread, not proof that spread beat chance."
     text += (" Another tree: python -m patient_zero.report --out OUT --lead TOKEN_ID (a tree in "
              "top_trees.json), or cli.py --lead TOKEN_ID.")
     return text
@@ -852,11 +910,14 @@ def selection_lines(rule, facts):
     """One or two short lines saying how the drawn tree was picked, for inside the figure itself."""
     nm = (facts or {}).get("nullmodel") or {}
     if rule == RULE_BEAT and nm.get("shuffles"):
-        bound = nm["chance_beats_upper_bound"]
-        return ["Picked as the largest of %s trees that beat every shuffle; chance alone allows up to %s such "
-                "trees among %s." % (_num(nm["trees_beating_every_shuffle"]),
-                                     _num(int(round(bound))) if bound >= 10 else _num(bound), _num(nm["tokens"])),
-                "So it shows how the method draws a spread; it is not proof that spread beat chance."]
+        first = ("Picked as the largest of %s trees that beat every shuffle; chance alone allows up to %s such "
+                 "trees among %s." % (_num(nm["trees_beating_every_shuffle"]), bound_text(beat_bound(nm)),
+                                      _num(nm["tokens"])))
+        beyond = beats_beyond_chance(nm)
+        if beyond:
+            return [first, "More trees beat every shuffle than luck gives on average; luck alone gives %s or more "
+                           "with a chance of at most %s." % (_num(beyond[0]), _small(beyond[2]))]
+        return [first, "So it shows how the method draws a spread; it is not proof that spread beat chance."]
     if rule == RULE_BEAT:
         return ["Picked as the largest tree that beat every shuffle."]
     if rule == RULE_LARGEST:
@@ -985,7 +1046,7 @@ def render_report(facts, records, detail, lead=None):
             [[label, _fmt_metric(o), _fmt_metric(m), _fmt_metric(a), _fmt_metric(b), g, n]
              for label, o, m, a, b, g, n in shuffle_rows(facts)], numeric=(1, 2, 3, 4, 5, 6))))
         out.append("<p>%s trees beat every shuffle (chance bound %s). Named links by token class:</p>"
-                   % (_e(_num(nm["trees_beating_every_shuffle"])), _e(_num(nm["chance_beats_upper_bound"]))))
+                   % (_e(_num(nm["trees_beating_every_shuffle"])), _e(bound_text(beat_bound(nm)))))
         out.append(_table(["class", "observed", "shuffle mean", "ratio", "shuffles at or above"],
                           [[c, b["observed"], b["mean"], b["ratio"], b["shuffles_ge_observed"]]
                            for c, b in sorted(nm["by_class"].items())], numeric=(1, 2, 3, 4)))

@@ -25,13 +25,13 @@ if ROOT not in sys.path:
 
 from patient_zero import pipeline as P  # noqa: E402
 
-EXAMPLE = os.path.join(ROOT, "examples", "fake_log.ndjson")
+EXAMPLE = os.path.join(ROOT, "examples", "planted_chat.ndjson")
 README = os.path.join(ROOT, "README.md")
 GITATTRIBUTES = os.path.join(ROOT, ".gitattributes")
 
 # The shipped example, LF line endings, as committed.
-EXAMPLE_BYTES = 2841
-EXAMPLE_SHA256 = "3f2f3cc3d51428c130f994c3b83d42b86801a07df356b64d40e708b3b159c5d8"
+EXAMPLE_BYTES = 3428
+EXAMPLE_SHA256 = "205cf6a7f8c41dfbb8bb01432f5aa14027805c7ca70b005bf17bcb26bfeccbb9"
 
 CORE_RE = re.compile(r"core_sha256: ([0-9a-f]{64})")
 
@@ -80,7 +80,7 @@ class ExampleRunMatchesReadme(unittest.TestCase):
         self.assertEqual(self.code, 0)
         files = self.facts["input"]["files"]
         self.assertEqual(len(files), 1)
-        self.assertEqual(files[0]["name"], "fake_log.ndjson")
+        self.assertEqual(files[0]["name"], "planted_chat.ndjson")
         self.assertEqual(files[0]["bytes"], EXAMPLE_BYTES)
         self.assertEqual(files[0]["sha256"], EXAMPLE_SHA256)
 

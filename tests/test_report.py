@@ -394,12 +394,44 @@ class Verdict(unittest.TestCase):
         self.assertIn("largest of 42 trees that beat every shuffle", lines[0])
         self.assertIn("up to 76 such trees among 7,671", lines[0])
         self.assertIn("not proof", lines[1])
-        small = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 1,
-                               "chance_beats_upper_bound": 0.0297, "tokens": 3}}
-        self.assertIn("up to 0.0 such trees", R.selection_lines(R.RULE_BEAT, small)[0])
+        small = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 2,
+                               "chance_beats_upper_bound": 0.03, "tokens": 3}}
+        lines = R.selection_lines(R.RULE_BEAT, small)
+        self.assertIn("up to 0.03 such trees among 3", lines[0])  # 2 decimals under 1, never "0.0"
+        self.assertNotIn("not proof", " ".join(lines))  # 2 trees beat every shuffle, more than 0.03
+        self.assertIn("2 or more with a chance of at most 0.015", lines[1])  # Markov: 0.0297 / 2
+        self.assertIn("not proof", R.selection_lines(R.RULE_BEAT, {"nullmodel": dict(
+            small["nullmodel"], trees_beating_every_shuffle=0)})[1])
         self.assertIn("no tree beat every shuffle", R.selection_lines(R.RULE_LARGEST, None)[0])
         self.assertEqual(R.selection_lines(R.RULE_GIVEN, None), ["Picked by hand (--lead)."])
         self.assertEqual(R.selection_lines(R.RULE_NONE, None), [])
+
+    def test_bound_text_never_reads_zero(self):
+        self.assertEqual(R.bound_text(75.95), "76")
+        self.assertEqual(R.bound_text(7.6), "7.6")
+        self.assertEqual(R.bound_text(0.0297), "0.03")
+        self.assertEqual(R.bound_text(0.5), "0.50")
+        self.assertEqual(R.bound_text(3 / 1001), "0.003")  # would round to 0.00
+        self.assertEqual(R.bound_text(None), "n/a")
+        # recomputed from the counts: facts.json may have rounded a tiny bound to 0.0
+        self.assertAlmostEqual(R.beat_bound({"shuffles": 1000, "tokens": 3,
+                                             "chance_beats_upper_bound": 0.0}), 3 / 1001)
+
+    def test_lead_text_drops_not_proof_only_beyond_the_bound(self):
+        real = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 42,
+                              "chance_beats_upper_bound": 75.95, "tokens": 7671}}
+        text = R._lead_text(R.RULE_BEAT, real)
+        self.assertIn("chance alone would let up to 76 trees do that", text)
+        self.assertIn("not proof that spread beat chance", text)
+        small = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 2,
+                               "chance_beats_upper_bound": 0.03, "tokens": 3}}
+        text = R._lead_text(R.RULE_BEAT, small)
+        self.assertIn("up to 0.03 trees do that (tokens / (shuffles + 1)) on average", text)
+        self.assertIn("2 or more with a chance of at most 0.015", text)
+        self.assertNotIn("not proof", text)
+        narrow = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 77,
+                                "chance_beats_upper_bound": 75.95, "tokens": 7671}}
+        self.assertIn("at most 0.99", R._lead_text(R.RULE_BEAT, narrow))  # a narrow win reads as narrow
 
     def test_note_lines_sit_in_the_public_figure(self):
         d = detail([node(0, 0, "a", "first"), node(1, 5, "a", "linked", 0), node(2, 9, "a", "linked", 1)])

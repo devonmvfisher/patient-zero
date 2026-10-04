@@ -73,7 +73,7 @@ def write_csv(folder):
         w.writerow(["msg_id", "posted_at", "room", "author", "message", "team", "clock_error_s",
                     "secret_note", FIELD])
         for n, (rid, agent, t, room, text) in enumerate(CHAT):
-            w.writerow([rid, ct_iso(t), room, agent, text, "demo", "1", "DROPME-%d" % n, HALF])
+            w.writerow([rid, ct_iso(t), room, agent, text, "made-up", "1", "DROPME-%d" % n, HALF])
     return path
 
 
@@ -84,7 +84,7 @@ def write_tsv_gz(folder):
         w = csv.writer(fh, delimiter="\t")
         w.writerow(["message", "author", "room", "posted_at", "msg_id", "team", "clock_error_s"])
         for rid, agent, t, room, text in CHAT:
-            w.writerow([text, agent, room, "%d" % (BASE + t), rid, "demo", "1"])
+            w.writerow([text, agent, room, "%d" % (BASE + t), rid, "made-up", "1"])
     return path
 
 
@@ -100,7 +100,7 @@ def write_slack(folder, name="chat-slack.ndjson"):
                     "ts": "%d.000000" % (BASE + t),
                     "user_profile": {"name": agent, "real_name": "DROPME"},
                     "metadata": {"event_type": "agent_log",
-                                 "event_payload": {"clock_error_s": 1, "team": "demo"}},
+                                 "event_payload": {"clock_error_s": 1, "team": "made-up"}},
                 },
             }) + "\n")
     return path

@@ -1,0 +1,20 @@
+{"id": "c01", "agent": "Ada", "time": "2026-01-10T10:00:00Z", "place": "chat/north", "uncertainty_seconds": 1, "group": "made-up", "text": "mirror at lantern-depot.io is quick today"}
+{"id": "c02", "agent": "Moss", "time": "2026-01-10T10:02:00Z", "place": "chat/north", "uncertainty_seconds": 1, "group": "made-up", "text": "lunch moved to one o'clock"}
+{"id": "c03", "agent": "Bram", "time": "2026-01-10T10:05:00Z", "place": "chat/north", "uncertainty_seconds": 1, "group": "made-up", "text": "thanks, reading it now"}
+{"id": "c04", "agent": "Bram", "time": "2026-01-10T10:10:00Z", "place": "chat/east", "uncertainty_seconds": 1, "group": "made-up", "text": "east team: lantern-depot.io has the files"}
+{"id": "c05", "agent": "Cleo", "time": "2026-01-10T10:15:00Z", "place": "chat/east", "uncertainty_seconds": 1, "group": "made-up", "text": "noted, will pass it on"}
+{"id": "c06", "agent": "Cleo", "time": "2026-01-10T10:20:00Z", "place": "chat/south", "uncertainty_seconds": 1, "group": "made-up", "text": "south room, try lantern-depot.io first"}
+{"id": "c07", "agent": "Dax", "time": "2026-01-10T10:25:00Z", "place": "chat/south", "uncertainty_seconds": 1, "group": "made-up", "text": "switching to lantern-depot.io as well"}
+{"id": "c08", "agent": "Eve", "time": "2026-01-10T10:30:00Z", "place": "chat/plaza", "uncertainty_seconds": 1, "group": "made-up", "text": "BLUEHERON: put this word on urgent notes"}
+{"id": "c09", "agent": "Finn", "time": "2026-01-10T10:32:00Z", "place": "chat/plaza", "uncertainty_seconds": 1, "group": "made-up", "text": "ok"}
+{"id": "c10", "agent": "Finn", "time": "2026-01-10T10:34:00Z", "place": "chat/finn-desk", "uncertainty_seconds": 1, "group": "made-up", "text": "BLUEHERON checking the queue"}
+{"id": "c11", "agent": "Gus", "time": "2026-01-10T10:36:00Z", "place": "chat/plaza", "uncertainty_seconds": 1, "group": "made-up", "text": "seen"}
+{"id": "c12", "agent": "Moss", "time": "2026-01-10T10:37:00Z", "place": "chat/plaza", "uncertainty_seconds": 1, "group": "made-up", "text": "who has the projector key"}
+{"id": "c13", "agent": "Gus", "time": "2026-01-10T10:38:00Z", "place": "chat/gus-desk", "uncertainty_seconds": 1, "group": "made-up", "text": "BLUEHERON queue looks clear"}
+{"id": "c14", "agent": "Hal", "time": "2026-01-10T10:40:00Z", "place": "chat/plaza", "uncertainty_seconds": 1, "group": "made-up", "text": "fine by me"}
+{"id": "c15", "agent": "Hal", "time": "2026-01-10T10:42:00Z", "place": "chat/hal-desk", "uncertainty_seconds": 1, "group": "made-up", "text": "BLUEHERON taking the late shift"}
+{"id": "c16", "agent": "Ivy", "time": "2026-01-10T10:50:00Z", "place": "chat/harbor", "uncertainty_seconds": 1, "group": "made-up", "text": "uploaded quill_map.csv for everyone"}
+{"id": "c17", "agent": "Jun", "time": "2026-01-10T10:50:01Z", "place": "chat/harbor", "uncertainty_seconds": 1, "group": "made-up", "text": "same here, quill_map.csv attached"}
+{"id": "c18", "agent": "Kai", "time": "2026-01-10T10:55:00Z", "place": "chat/harbor", "uncertainty_seconds": 1, "group": "made-up", "text": "using quill_map.csv from now on"}
+{"id": "c19", "agent": "Moss", "time": "2026-01-10T10:57:00Z", "place": "chat/harbor", "uncertainty_seconds": 1, "group": "made-up", "text": "tea is ready downstairs"}
+{"id": "c20", "agent": "Lux", "time": "2026-01-10T11:00:00Z", "place": "chat/harbor", "uncertainty_seconds": 1, "group": "made-up", "text": "quill_map.csv works for me too"}

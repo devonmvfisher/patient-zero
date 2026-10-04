@@ -118,13 +118,19 @@ PLANTED = {
 CHAT_NAMES = sorted(set(line[1] for line in CHAT))
 
 
-def write_chat(folder):
-    path = os.path.join(folder, "chat.ndjson")
+def write_chat(folder, name="chat.ndjson"):
+    """Write the planted chat log; every line is labelled made-up in its group field.
+
+    The shipped demo examples/planted_chat.ndjson is this file, byte for byte
+    (tests/test_demo.py checks it). To regenerate it from the repo root:
+    python -c "from tests.test_planted import write_chat; write_chat('examples', 'planted_chat.ndjson')"
+    """
+    path = os.path.join(folder, name)
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         for rid, agent, t, room, text in CHAT:
             fh.write(json.dumps({
                 "id": rid, "agent": agent, "time": iso(t), "place": room,
-                "uncertainty_seconds": 1, "group": "demo", "text": text,
+                "uncertainty_seconds": 1, "group": "made-up", "text": text,
             }) + "\n")
     return path
 
