@@ -17,7 +17,11 @@ Python standard library only. Two adapters:
 
 ``generic``
     JSON Lines (``.jsonl``, ``.ndjson``, optionally gzipped), one event per
-    line with ``agent``, ``time``, ``place`` and ``text``. Optional fields:
+    line with ``agent``, ``time``, ``place`` and ``text``. UTF-8, with or
+    without a byte-order mark; a file that starts with a UTF-16 or UTF-32
+    byte-order mark (Windows PowerShell 5 ``Out-File`` and ``>`` write UTF-16)
+    is read as that. Any other bytes that are not UTF-8 stop the load with the
+    line number. Optional fields:
     ``id``, ``uncertainty_seconds``, ``group``, ``family``, ``time_grade`` and
     ``human`` (true marks a human speaker). ``time`` is an ISO-8601 string
     (no zone means UTC) or POSIX seconds (a number, or a string of digits
@@ -192,26 +196,85 @@ def _keep(keys):
     return hook
 
 
-def _open_text(path):
+def _open_binary(path):
     if path.lower().endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8")
-    return open(path, "r", encoding="utf-8")
+        return gzip.open(path, "rb")
+    return open(path, "rb")
 
 
-def _read_json_lines(path, keys):
-    """Yield (line_number, whitelisted dict) for each non-empty line."""
+def _open_text(path, encoding="utf-8"):
+    if path.lower().endswith(".gz"):
+        return gzip.open(path, "rt", encoding=encoding)
+    return open(path, "r", encoding=encoding)
+
+
+# Longest first: the UTF-32-LE mark starts with the UTF-16-LE one.
+_BOMS = ((b"\xff\xfe\x00\x00", "utf-32"), (b"\x00\x00\xfe\xff", "utf-32"),
+         (b"\xff\xfe", "utf-16"), (b"\xfe\xff", "utf-16"), (b"\xef\xbb\xbf", "utf-8-sig"))
+
+
+def sniff_encoding(path):
+    """Codec for a text file: utf-16 or utf-32 when it starts with their byte-order
+    mark, else utf-8-sig (UTF-8, with or without a byte-order mark)."""
+    with _open_binary(path) as fh:
+        head = fh.read(4)
+    for bom, name in _BOMS:
+        if head.startswith(bom):
+            return name
+    return "utf-8-sig"
+
+
+def _first_bad_utf8_line(path):
+    """1-based number of the first line (split on newline bytes) that is not UTF-8, or None."""
+    with _open_binary(path) as fh:
+        for number, raw in enumerate(fh, 1):
+            try:
+                raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return number
+    return None
+
+
+def _decode_problem(path, encoding):
+    """A plain sentence for a file whose bytes do not decode."""
+    if encoding.startswith("utf-8"):
+        number = _first_bad_utf8_line(path)
+        where = " line %d" % number if number else ""
+        return "%s%s: not UTF-8 text (save the file as UTF-8; a byte-order mark is fine)" % (path, where)
+    return "%s: not valid %s text (save the file as UTF-8)" % (path, encoding.upper())
+
+
+def _read_json_lines(path, keys, encoding="utf-8"):
+    """Yield (line_number, whitelisted dict) for each non-empty line.
+
+    Bytes that do not decode with ``encoding`` raise ValueError with the line.
+    """
     hook = _keep(keys)
-    with _open_text(path) as fh:
-        for number, line in enumerate(fh, 1):
-            line = line.strip()
-            if line:
-                try:
-                    obj = json.loads(line, object_pairs_hook=hook)
-                except json.JSONDecodeError as exc:
-                    raise ValueError("%s line %d: not valid JSON (%s)" % (path, number, exc.msg)) from None
-                if not isinstance(obj, dict):
-                    raise ValueError("%s line %d: expected a JSON object" % (path, number))
-                yield number, obj
+    with _open_text(path, encoding) as fh:
+        try:
+            for number, line in enumerate(fh, 1):
+                line = line.strip()
+                if line:
+                    try:
+                        obj = json.loads(line, object_pairs_hook=hook)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError("%s line %d: not valid JSON (%s)" % (path, number, exc.msg)) from None
+                    except RecursionError:
+                        raise ValueError("%s line %d: not valid JSON (nested too deep)" % (path, number)) from None
+                    if not isinstance(obj, dict):
+                        raise ValueError("%s line %d: expected a JSON object" % (path, number))
+                    yield number, obj
+        except UnicodeDecodeError:
+            raise ValueError(_decode_problem(path, encoding)) from None
+
+
+def read_generic_lines(path, keys=_GENERIC_KEYS):
+    """``_read_json_lines`` for a generic log, with the codec from ``sniff_encoding``.
+
+    Every reader of a generic log goes through here, so a byte-order mark is
+    accepted the same way everywhere.
+    """
+    return _read_json_lines(path, keys, encoding=sniff_encoding(path))
 
 
 _SECONDS_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)\Z")
@@ -226,7 +289,11 @@ def parse_time(value):
     if isinstance(value, bool):
         raise ValueError("time must be a string or a number")
     if isinstance(value, (int, float)):
-        return float(value)
+        try:
+            seconds = float(value)
+        except OverflowError:  # an integer with hundreds of digits
+            raise ValueError("time out of range") from None
+        return _in_range(seconds)
     if not isinstance(value, str) or not value.strip():
         raise ValueError("time must be a string or a number")
     text = value.strip()
@@ -237,7 +304,18 @@ def parse_time(value):
     stamp = datetime.datetime.fromisoformat(text)
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=datetime.timezone.utc)
-    return stamp.timestamp()
+    return _in_range(stamp.timestamp())
+
+
+def _in_range(seconds):
+    """``seconds`` if it is finite and ``iso_utc`` can print it on this machine, else ValueError."""
+    if not math.isfinite(seconds):
+        raise ValueError("time must be a finite number")
+    try:
+        iso_utc(seconds)
+    except (OverflowError, OSError, ValueError):
+        raise ValueError("time out of range") from None
+    return seconds
 
 
 def iso_utc(seconds):
@@ -474,7 +552,7 @@ def _json_records(path, sources):
     for source in sources.values():
         keep.add(source)
         keep.update(source.split("."))
-    for number, obj in _read_json_lines(path, frozenset(keep)):
+    for number, obj in _read_json_lines(path, frozenset(keep), encoding=sniff_encoding(path)):
         yield "line %d" % number, number, {f: _resolve(obj, s) for f, s in sources.items()}
 
 
@@ -655,7 +733,13 @@ def load_generic(path, field_map=None):
                 unc = 0
             elif cells:
                 unc = _csv_seconds(unc, path, where)
-            if isinstance(unc, bool) or not isinstance(unc, (int, float)) or unc < 0:
+            if isinstance(unc, bool) or not isinstance(unc, (int, float)):
+                raise ValueError("%s %s: uncertainty_seconds must be a number >= 0" % (path, where))
+            try:
+                unc = float(unc)
+            except OverflowError:
+                raise ValueError("%s %s: uncertainty_seconds is too large" % (path, where)) from None
+            if math.isnan(unc) or unc < 0:
                 raise ValueError("%s %s: uncertainty_seconds must be a number >= 0" % (path, where))
             opt = {k: (str(obj[k]) if obj[k] is not _MISSING and obj[k] is not None else None)
                    for k in ("group", "family", "time_grade")}

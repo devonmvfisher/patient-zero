@@ -52,6 +52,8 @@ A full run takes about 1 to 5 minutes on one laptop. We measured 45 s on a quiet
 
 `--out` must be outside the repo, or inside the repo's git-ignored `out/` folder.
 
+Writers never overwrite their own inputs. `cli.py --out`, `checks --out`, `tools/peek.py --out` (and the `.json` file it writes next to it), `peek --record --md`, `tools/facts_sheet.py --md`/`--html`, `tokens`/`cascade --summary` and `offwiki --json`/`--facts` stop with exit code 2 and one sentence, before any work, when the path names one of their inputs or sits inside an input folder. The marks file and the plan outline may be saved with a byte-order mark.
+
 | File | What it holds |
 |---|---|
 | `facts.json` | Counts only. Input names, sizes and hashes (plus the format and `--map`, when used); parameters; loader, token and tree counts; the shuffle baseline; scores; run times; `core_sha256` |
@@ -69,7 +71,7 @@ The figure's order-null line comes from `out/wiki/checks.json` (see Robustness c
 
 ## Your own log (generic adapter)
 
-Write JSON Lines (`.jsonl` or `.ndjson`, gzipped or not), one event per line:
+Write JSON Lines (`.jsonl` or `.ndjson`, gzipped or not), one event per line. Save it as UTF-8; a byte-order mark is fine (Windows PowerShell 5 `Out-File -Encoding utf8` adds one), and a file that starts with a UTF-16 mark (what Windows PowerShell 5 writes with `>`) is read as UTF-16. A line that is not valid stops the run with its line number and exit code 2:
 
 ```
 {"id": "e01", "agent": "Wren", "time": "2026-01-10T09:00:00Z", "place": "board/plans", "text": "..."}
@@ -139,14 +141,13 @@ patient-zero: ERROR: examples/fake_log.csv has no column 'usr' (--map agent=usr)
 python -m unittest
 ```
 
-The planted known-answer tests are the evidence that the tool can see spread: `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. The suite runs in about 10 seconds. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`.
-The suite runs in about 10 seconds. `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`. The claim check's real-run tests run only when `PZ_RUN` names a real run's output folder, or when `PZ_DATA` is set (the pipeline then runs first).
+The planted known-answer tests are the evidence that the tool can see spread: `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. `tests/test_hostile.py` feeds 11 odd made-up logs (byte-order marks, UTF-16, cp1252, a blank line, bad times, a null agent, a number as text, a duplicate id, a cut-off line) to every command that reads a log, and points every writer at its own input: no traceback, and no input changes. The suite runs in about 40 seconds without data (longer on a busy machine). Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`. The claim check's real-run tests run only when `PZ_RUN` names a real run's output folder, or when `PZ_DATA` is set (the pipeline then runs first).
 
 ## Data handling
 
 The German wiki text was written by AI agents for other agents, and some of it is hostile. Only deterministic code reads it. Nothing here opens a URL or runs a command found in the data. Strings taken from the data are escaped and cut to 80 characters before they reach any output.
 
-Maintainer tool: `tools/leakcheck.py` runs before every commit. It fails on any `.gz`, `.jsonl` or `.zip` file in the repo, on IP-shaped strings and on the half-IP field name. It also fails on any 12-word run copied from the data. It needs an index built from the data (`--build-index --data DIR`). In a fresh clone without that index it fails closed with exit code 2. It also scans the git-ignored `out/` folder, so it fails on the `.jsonl` files that a demo run leaves there. Keep run outputs outside the repo when you run it.
+Maintainer tool: `tools/leakcheck.py` runs before every commit. It fails on any `.gz`, `.jsonl` or `.zip` file in the repo, on IP-shaped strings and on the half-IP field name. It also fails on any 12-word run copied from the data. It needs an index built from the data (`--build-index --data DIR`), and refuses to write that index inside the repo or inside the data folder. In a fresh clone without that index it fails closed with exit code 2. It also scans the git-ignored `out/` folder, so it fails on the `.jsonl` files that a demo run leaves there. Keep run outputs outside the repo when you run it.
 
 Maintainer tool: `tools/claimcheck.py` checks that every number in this README, in the text of `docs/*.svg` and in any `WRITEUP*` file equals a value in a run's `facts.json`, `checks.json`, `calibration.json` or lead tree, or is covered by an entry in `claims-allow.json` that gives its reason. It reads those documents and never changes them. It also reports how many numbers would still pass if their last digit moved by one. Run it after every merge that changes a number: `python tools/claimcheck.py --run wiki=PATH/TO/out`.
 

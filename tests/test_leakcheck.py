@@ -218,6 +218,17 @@ class LeakcheckTest(unittest.TestCase):
         code, out = self.run_main(["--repo", repo, "--index", os.path.join(repo, "grams.bin")])
         self.assertEqual(code, 2, out)
 
+    def test_index_inside_data_folder_refused(self):
+        rev = os.path.join(self.data, "revisions.jsonl.gz")
+        with open(rev, "rb") as fh:
+            before = fh.read()
+        for target in (rev, os.path.join(self.data, "grams.bin")):
+            with self.assertRaises(lc.SetupError):
+                lc.build_index(self.data, target)
+        with open(rev, "rb") as fh:
+            self.assertEqual(fh.read(), before)
+        self.assertFalse(os.path.exists(os.path.join(self.data, "grams.bin")))
+
     def test_settings_mismatch_is_setup_error(self):
         bad = os.path.join(self.tmp, "bad.bin")
         shutil.copy(self.index_path, bad)

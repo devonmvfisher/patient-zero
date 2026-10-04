@@ -245,6 +245,10 @@ class BadMap(unittest.TestCase):
         self._fails(self.csv, "agent=author,agent=room", "names agent twice")
 
     def test_map_refused_for_wiki(self):
+        # --out outside the input folder: every writer refuses an output inside a wiki input folder
+        outer = tempfile.mkdtemp(prefix="pz-badmap-out-")
+        self.addCleanup(shutil.rmtree, outer, True)
+        self.out = os.path.join(outer, "out")
         self._fails(self.tmp, "agent=label", "works only with --adapter generic", adapter="wiki")
 
     def test_agent_pointing_at_an_object(self):

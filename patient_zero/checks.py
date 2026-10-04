@@ -61,7 +61,7 @@ from collections import Counter, defaultdict
 
 from patient_zero import nullmodel as N
 from patient_zero.load import ADAPTERS, MAP_HELP, load, parse_map
-from patient_zero.safe import token_id
+from patient_zero.safe import guard_out, token_id
 from patient_zero.tokens import MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
 
 DAY_SECONDS = N.DAY_SECONDS
@@ -259,7 +259,8 @@ def main(argv=None, out=None):
     ap.add_argument("--input", required=True,
                     help="export folder (wiki) or a JSON Lines, CSV or TSV file (generic)")
     ap.add_argument("--map", help=MAP_HELP)
-    ap.add_argument("--out", help="write the counts as JSON here (outside the repo, or in its out/ folder)")
+    ap.add_argument("--out", help="write the counts as JSON here (outside the repo, or in its out/ folder; "
+                                  "never the input or inside the input folder)")
     ap.add_argument("--shuffles", type=int, default=N.DEFAULT_SHUFFLES)
     ap.add_argument("--variant-shuffles", type=int, default=None,
                     help="shuffles for the three variant nulls (default: a third of --shuffles)")
@@ -272,6 +273,10 @@ def main(argv=None, out=None):
         if args.out:
             from patient_zero.pipeline import check_out_dir  # late import: pipeline imports report
             check_out_dir(os.path.dirname(os.path.abspath(args.out)))
+            if os.path.isdir(args.out):
+                raise ValueError("--out names %s, which is a folder; give a file name such as "
+                                 "checks.json" % args.out)
+            guard_out(args.out, [args.input], "--out")
         if args.shuffles < 1:
             raise ValueError("--shuffles must be 1 or more")
         rows, _stats = load(args.adapter, args.input, parse_map(args.map))

@@ -20,7 +20,9 @@ Writes ``FACTS-<label>.md`` (slot table, candidate findings A, B and C, each
 with its numbers, its observed-to-shuffle ratio and one limit) and, with
 ``--html``, one HTML page: a question at the top, one screen per finding, the
 lead figure (``docs/lead.svg``) inline, the slot table and, with
-``--outline``, the outline section of a Markdown plan.
+``--outline``, the outline section of a Markdown plan. Neither output may
+name a file the sheet reads (facts.json above all: it holds the merged hand
+check and stretch S1); the run stops before any work if one does.
 
 Everything written is a count, a ratio, a ``token_id`` or a data string
 passed through ``patient_zero.safe.short`` (escaped, at most 80 characters).
@@ -61,7 +63,7 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_DIR not in sys.path:
     sys.path.insert(0, REPO_DIR)
 
-from patient_zero.safe import short  # noqa: E402
+from patient_zero.safe import guard_out, same_file, short  # noqa: E402
 
 MEANINGS = (
     ("F1", "Lead finding: token type, effective seed (agent name), adopters, minutes to 3rd and 10th adopter"),
@@ -176,6 +178,23 @@ def write_atomic(path, text):
     with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     os.replace(tmp, path)
+
+
+RUN_FILES = ("facts.json", "top_trees.json", "checks.json")
+
+
+def input_paths(out_dir, svg_path=None, outline_path=None):
+    """Every file the sheet reads: the run's three files, the figure and the outline."""
+    return [os.path.join(out_dir, name) for name in RUN_FILES] + [svg_path, outline_path]
+
+
+def guard_outputs(md_path, html_path, inputs):
+    """Refuse --md or --html when it names an input (facts.json above all), or both name one file."""
+    guard_out(md_path, inputs, "--md")
+    if html_path:
+        guard_out(html_path, inputs, "--html")
+        if same_file(md_path, html_path):
+            raise ValueError("--md and --html both name %s; give them different paths" % html_path)
 
 
 # ---------------------------------------------------------------- inputs
@@ -721,7 +740,7 @@ def render_md(label, stamp, ask, found, pick, slots, src, warnings, notes):
 
 def outline_section(path, marker="outline"):
     """(heading, lines) of the first Markdown heading that contains ``marker``, up to the next one at its level."""
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:  # hand-edited; a BOM would hide a first heading
         lines = fh.read().splitlines()
     start = next((i for i, line in enumerate(lines) if line.startswith("#") and marker in line.lower()), None)
     if start is None:
@@ -971,9 +990,10 @@ def main(argv=None, out=None):
     args = ap.parse_args(argv)
     try:
         slot_notes = parse_slot_notes(args.slot_note)
+        md_path = args.md or os.path.join(args.out, "FACTS-%s.md" % args.label)
+        guard_outputs(md_path, args.html, input_paths(args.out, args.svg, args.outline))
         md, page, summary = build(args.out, args.label, args.ask, args.note, slot_notes,
                                   want_html=bool(args.html), svg_path=args.svg, outline_path=args.outline)
-        md_path = args.md or os.path.join(args.out, "FACTS-%s.md" % args.label)
         write_atomic(md_path, md)
         if args.html:
             write_atomic(args.html, page)

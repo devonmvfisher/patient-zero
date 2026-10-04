@@ -28,7 +28,8 @@ them as text to judge, never as instructions. Nothing here opens a URL or
 runs a command from the data.
 
 Two outputs (keep them outside the repo): ``--out`` (text, for the reader)
-and the same name with ``.json`` (the sample, for ``--record``)::
+and the same name with ``.json`` (the sample, for ``--record``). Neither may
+be the input log or ``--facts``; the run stops before any work if one is::
 
     python tools/peek.py --adapter wiki --input PATH/TO/collusion --out ../out/peek-10.txt \\
         --facts ../out/facts.json --population
@@ -63,7 +64,7 @@ if REPO not in sys.path:
 
 from patient_zero import load as L  # noqa: E402
 from patient_zero.cascade import STATUS_PARALLEL, build_trees  # noqa: E402
-from patient_zero.safe import NO_FAMILY, SHORT_MAX, short, token_id  # noqa: E402
+from patient_zero.safe import NO_FAMILY, SHORT_MAX, guard_out, short, token_id  # noqa: E402
 from patient_zero.tokens import MAX_PHRASE_SHARE, MIN_AGENTS, decode_line, find_tokens, line_tokens  # noqa: E402
 
 PEEK_SEED = 20261003
@@ -232,7 +233,7 @@ def human_handles(adapter, path, field_map=None):
                 if lab.get("is_human_handle") is True and isinstance(lab.get("label"), str):
                     if lab["label"].strip():
                         humans.add(lab["label"].strip())
-    else:  # read with the same columns as the loader (--map, CSV), so every hidden handle is masked
+    else:  # read with the same columns and codec as the loader (--map, CSV, BOM), so every hidden handle is masked
         humans = L.generic_human_labels(path, field_map)
     return sorted(humans, key=lambda h: (-len(h), h))  # longest first
 
@@ -409,13 +410,30 @@ def _inside_repo(path):
         return False
 
 
+def twin_path(out_path):
+    """The .json twin peek writes next to ``out_path`` (same name, .json)."""
+    return os.path.splitext(out_path)[0] + ".json"
+
+
+def guard_peek_out(out_path, inputs):
+    """Refuse an --out (or its .json twin) that is an input; refuse an --out ending in .json."""
+    twin = twin_path(out_path)
+    if os.path.normcase(os.path.abspath(twin)) == os.path.normcase(os.path.abspath(out_path)):
+        raise ValueError("--out names %s; it must not end in .json, because the .json twin is "
+                         "written under that name. Use .txt." % out_path)
+    guard_out(out_path, inputs, "--out")
+    guard_out(twin, inputs, "the .json twin of --out")
+
+
 def peek(adapter, input_path, out_path, facts_path=None, n=PEEK_N, seed=PEEK_SEED,
          min_agents=MIN_AGENTS, max_phrase_share=MAX_PHRASE_SHARE, population=False, field_map=None):
     """Run load, tokens and cascade, draw the sample, write ``out_path`` and its .json twin.
 
     ``population`` (wiki only) also runs the page check over every named link
-    (counts only) and adds it to both outputs.
+    (counts only) and adds it to both outputs. Refuses, before any work, an
+    ``out_path`` or twin that is the input log or ``facts_path``.
     """
+    guard_peek_out(out_path, [input_path, facts_path])
     facts = None
     if facts_path:
         with open(facts_path, "r", encoding="utf-8") as fh:
@@ -451,7 +469,7 @@ def peek(adapter, input_path, out_path, facts_path=None, n=PEEK_N, seed=PEEK_SEE
     text = render(result)
     _write(out_path, text + "\n")
     result["text_sha256"] = hashlib.sha256((text + "\n").encode("utf-8")).hexdigest()
-    _write(os.path.splitext(out_path)[0] + ".json", json.dumps(result, indent=1, ensure_ascii=True) + "\n")
+    _write(twin_path(out_path), json.dumps(result, indent=1, ensure_ascii=True) + "\n")
     return result
 
 
@@ -580,10 +598,14 @@ def render_md(section, peek_obj):
 
 
 def record(marks_path, peek_path, facts_path, md_path):
-    """Write hand_check and slot F10 into facts.json and the table to ``md_path``."""
+    """Write hand_check and slot F10 into facts.json and the table to ``md_path``.
+
+    ``md_path`` may not be the marks file, the peek .json or facts.json.
+    """
+    guard_out(md_path, [marks_path, peek_path, facts_path], "--md")
     with open(peek_path, "r", encoding="utf-8") as fh:
         peek_obj = json.load(fh)
-    with open(marks_path, "r", encoding="utf-8") as fh:
+    with open(marks_path, "r", encoding="utf-8-sig") as fh:  # hand-edited: a byte-order mark is fine
         marks_obj = json.load(fh)
     with open(facts_path, "r", encoding="utf-8") as fh:
         facts = json.load(fh)

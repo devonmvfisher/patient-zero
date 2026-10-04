@@ -71,6 +71,7 @@ from statistics import median
 from typing import NamedTuple, Optional, Tuple
 
 from patient_zero.load import ADAPTERS, load
+from patient_zero.safe import guard_out
 from patient_zero.tokens import MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens, in_clock_order
 
 STATUS_FIRST = "first"
@@ -368,6 +369,7 @@ def main(argv=None, out=None):
                     help="a shared goal or prompt text file; its tokens are dropped (repeatable)")
     args = ap.parse_args(argv)
     try:
+        guard_out(args.summary, [args.input] + list(args.given), "--summary")
         rows, load_stats = load(args.adapter, args.input)
         given = []
         for path in args.given:

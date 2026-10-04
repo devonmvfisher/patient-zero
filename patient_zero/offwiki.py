@@ -94,7 +94,7 @@ from typing import FrozenSet, NamedTuple, Optional
 
 from patient_zero import load as L
 from patient_zero.pipeline import _sha256_file, check_out_dir, input_files
-from patient_zero.safe import short, token_id
+from patient_zero.safe import guard_out, short, token_id
 from patient_zero.tokens import (CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, _common_host, _norm_host,
                                  find_tokens, row_tokens)
 
@@ -648,6 +648,9 @@ def main(argv=None, out=None):
         for path in (args.facts, args.json):
             if path:
                 check_out_dir(os.path.dirname(os.path.abspath(path)))
+        guard_out(args.json, [args.input, args.facts] + list(args.given), "--json")
+        if args.facts:  # facts.json is merged in place by design; it may not sit in the export folder
+            guard_out(args.facts, [args.input] + list(args.given), "--facts")
         given = []
         for path in args.given:
             with open(path, "r", encoding="utf-8") as fh:

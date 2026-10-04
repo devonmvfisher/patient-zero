@@ -119,8 +119,8 @@
   {
    "file": "README.md",
    "at": "about {} seconds",
-   "text": "10",
-   "reason": "suite time without data (SKEPTIC fresh clone: 246 tests in 8.8 s)"
+   "text": "40",
+   "reason": "suite time without data (kirk plan trial, S01-S14: 489 tests in 40.9 s on a machine shared with other agents)"
   },
   {
    "file": "README.md",

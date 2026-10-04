@@ -84,6 +84,7 @@ from typing import NamedTuple, Tuple
 from urllib.parse import unquote
 
 from patient_zero.load import ADAPTERS, load, scrub_ips
+from patient_zero.safe import guard_out
 
 CLASSES = ("host", "file", "command", "code", "phrase", "convention")
 CONVENTION_KINDS = ("prefix", "mailbox", "control")
@@ -624,6 +625,7 @@ def main(argv=None, out=None):
                     help="a shared goal or prompt text file; its tokens are dropped (repeatable)")
     args = ap.parse_args(argv)
     try:
+        guard_out(args.summary, [args.input] + list(args.given), "--summary")
         rows, load_stats = load(args.adapter, args.input)
         given = []
         for path in args.given:

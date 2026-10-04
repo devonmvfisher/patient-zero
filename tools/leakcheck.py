@@ -149,6 +149,8 @@ def build_index(data_dir, index_path, repo_root=None):
         raise SetupError("refusing to write the index inside the repo: " + index_path)
     if repo_root and _is_inside(data_dir, repo_root):
         raise SetupError("refusing to read data from inside the repo: " + data_dir)
+    if _is_inside(index_path, data_dir):  # the index would land next to, or over, the export's own files
+        raise SetupError("refusing to write the index inside the data folder: " + index_path)
     hashes = set()
     sources = {}
 

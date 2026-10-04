@@ -14,7 +14,8 @@ see ``patient_zero.load.parse_map``. A CSV or TSV input, or a map, is
 recorded in the ``input`` section of facts.json.
 
 ``--out`` must be outside the repo, or inside the repo's git-ignored ``out/``
-folder. Four files are written there:
+folder, and must be a folder that is not an input and not inside the input
+folder (``check_out_paths``). Four files are written there:
 
 ``facts.json``
     Counts: input file names, sizes and SHA-256 hashes; parameters; loader
@@ -81,7 +82,7 @@ from patient_zero import report as R
 from patient_zero import score as S
 from patient_zero.cascade import STATUSES, build_trees
 from patient_zero.load import ADAPTERS, MAP_HELP, input_note, iso_utc, load, parse_map
-from patient_zero.safe import NO_FAMILY, SHORT_MAX, short, token_id  # noqa: F401 (re-exported)
+from patient_zero.safe import NO_FAMILY, SHORT_MAX, guard_out, short, token_id  # noqa: F401 (re-exported)
 from patient_zero.score import NARROW_RISKY, branch_sizes  # noqa: F401 (re-exported)
 from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
 
@@ -130,6 +131,19 @@ def check_out_dir(out_dir, repo_dir=REPO_DIR):
     """Refuse an output folder inside the repo, except the repo's git-ignored out/."""
     if _inside(out_dir, repo_dir) and not _inside(out_dir, os.path.join(repo_dir, "out")):
         raise ValueError("--out must be outside the repo (or inside its git-ignored out/ folder)")
+
+
+OUTPUT_FILES = ("facts.json", "trees.jsonl", "top_trees.json", "report.html")
+
+
+def check_out_paths(out_dir, inputs):
+    """Refuse an --out that is a file, is an input, sits inside an input folder, or
+    would hold an output file with the same path as an input (plain sentences)."""
+    guard_out(out_dir, inputs, "--out")
+    if os.path.exists(out_dir) and not os.path.isdir(out_dir):
+        raise ValueError("--out names %s, which is a file; give a folder for the four outputs" % out_dir)
+    for name in OUTPUT_FILES:
+        guard_out(os.path.join(out_dir, name), inputs, "--out")
 
 
 def input_files(adapter, path):
@@ -580,6 +594,7 @@ def main(argv=None, out=None):
     started_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         check_out_dir(args.out)
+        check_out_paths(args.out, [args.input] + list(args.given))
         field_map = parse_map(args.map)
         given = []
         for path in args.given:
