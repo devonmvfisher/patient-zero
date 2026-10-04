@@ -45,10 +45,13 @@ Privacy rules applied at load, in both adapters:
   (including the export's half-IP field) is discarded before a row exists.
   With ``field_map`` the whitelist is the mapped columns (and each part of
   a dotted path) plus the unmapped fields' own names.
-* IP-shaped strings (IPv4, IPv4 with ``x``/``*`` wildcards, IPv6) in text and
-  place names are replaced with ``[ip]``. An IP-shaped agent label is treated
-  as blank. Two-octet fragments cannot be told from decimals and are not
-  touched; dropping the half-IP field is the guard for those.
+* IP-shaped strings (IPv4, IPv4 with ``x``/``*`` wildcards, IPv6) in text,
+  place names and the group, family and time-grade labels are replaced with
+  ``[ip]`` (labels that differ only in such a string become one label). An
+  IP-shaped agent label is treated as blank; an address inside a longer
+  agent label is left as it is. Two-octet fragments cannot be told from
+  decimals and are not touched; dropping the half-IP field is the guard for
+  those.
 * Blank labels and human handles are exposure-only: the row keeps its text,
   time and place (so others can be exposed to it), but ``agent`` is ``None``
   and ``role`` says ``"blank"`` or ``"human"``. Human handles never leave the
@@ -182,6 +185,11 @@ def is_ip_shaped(value):
     """True when the whole value (trimmed) is an IP-shaped string."""
     value = value.strip()
     return bool(value) and scrub_ips(value)[0] == IP_MASK
+
+
+def mask_label(value):
+    """A group, family or time-grade label with IP-shaped text masked; other values are returned as they are."""
+    return scrub_ips(value)[0] if isinstance(value, str) else value
 
 
 # ---------------------------------------------------------------- helpers
@@ -367,7 +375,7 @@ def load_wiki(data_dir):
 
     families = {}
     for _n, p in _read_json_lines(page_path, _PAGE_KEYS):
-        families[p.get("page_id")] = p.get("page_family") or None
+        families[p.get("page_id")] = mask_label(p.get("page_family")) or None
 
     humans = set()
     if os.path.isfile(label_path):
@@ -424,8 +432,8 @@ def load_wiki(data_dir):
             stats["saves_on_unknown_page"] += 1
         place, n_ip = scrub_ips(str(page_id))
         stats["ip_masked_in_place"] += n_ip
-        group = s.get("wiki") or None
-        grade = s.get("time_grade") or None
+        group = mask_label(s.get("wiki")) or None
+        grade = mask_label(s.get("time_grade")) or None
         unc = s.get("uncertainty_seconds")
         per_group[group] += 1
         per_grade[grade] += 1
@@ -741,7 +749,7 @@ def load_generic(path, field_map=None):
                 raise ValueError("%s %s: uncertainty_seconds is too large" % (path, where)) from None
             if math.isnan(unc) or unc < 0:
                 raise ValueError("%s %s: uncertainty_seconds must be a number >= 0" % (path, where))
-            opt = {k: (str(obj[k]) if obj[k] is not _MISSING and obj[k] is not None else None)
+            opt = {k: (mask_label(str(obj[k])) if obj[k] is not _MISSING and obj[k] is not None else None)
                    for k in ("group", "family", "time_grade")}
             per_group[opt["group"]] += 1
             rows.append(Row(

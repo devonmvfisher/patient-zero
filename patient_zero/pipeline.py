@@ -59,7 +59,9 @@ folder (``check_out_paths``). Four files are written there:
 
 Strings taken from the data pass through ``short``: anything outside
 printable ASCII and every backslash is escaped, and the result is cut to 80
-characters. Nothing here opens a URL or runs a command from the data.
+characters. The input file names in facts.json are shown the same way, with
+IP-shaped text masked. Nothing here opens a URL or runs a command from the
+data.
 """
 
 import argparse
@@ -81,7 +83,7 @@ from patient_zero import nullmodel as N
 from patient_zero import report as R
 from patient_zero import score as S
 from patient_zero.cascade import STATUSES, build_trees
-from patient_zero.load import ADAPTERS, MAP_HELP, input_note, iso_utc, load, parse_map
+from patient_zero.load import ADAPTERS, MAP_HELP, input_note, iso_utc, load, parse_map, scrub_ips
 from patient_zero.safe import NO_FAMILY, SHORT_MAX, guard_out, short, token_id  # noqa: F401 (re-exported)
 from patient_zero.score import NARROW_RISKY, branch_sizes  # noqa: F401 (re-exported)
 from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
@@ -152,8 +154,9 @@ def input_files(adapter, path):
         paths = [os.path.join(path, n) for n in WIKI_FILES if os.path.isfile(os.path.join(path, n))]
     else:
         paths = [path]
-    return [{"name": os.path.basename(p), "bytes": os.path.getsize(p), "sha256": _sha256_file(p)}
-            for p in paths]
+    # The name is shown, not opened again: IP-shaped text masked, escaped and cut like any data string.
+    return [{"name": short(scrub_ips(os.path.basename(p))[0]), "bytes": os.path.getsize(p),
+             "sha256": _sha256_file(p)} for p in paths]
 
 
 def code_info(repo_dir=REPO_DIR):
