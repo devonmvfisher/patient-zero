@@ -276,11 +276,11 @@ class ExampleRun(ExampleBase):
         path = os.path.join(self.repo, "WRITEUP.md")
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        write(path, text.replace("Seed 20261003", "Seed 20261004").replace("has 14 rows", "has 15 rows"))
+        write(path, text.replace("Seed 20261003", "Seed 20261004").replace("has 20 rows", "has 21 rows"))
         code, out = self.check()
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL WRITEUP.md:4:6  20261004  allow entry", out)
-        self.assertRegex(out, r"FAIL WRITEUP\.md:3:\d+  15  allow entry \d+: the sources give 14")
+        self.assertRegex(out, r"FAIL WRITEUP\.md:3:\d+  21  allow entry \d+: the sources give 20")
 
     def test_stale_entry_listed_and_strict_fails(self):
         allow_with(self.repo, entries=[{"file": "README.md", "at": "no such words {} here", "text": "5",
@@ -297,7 +297,7 @@ class ExampleRun(ExampleBase):
         self._writeup("20261003")
         code, out = self.check()
         self.assertEqual(code, 0, out)
-        self.assertRegex(out, r"UNVERIFIED WRITEUP\.md:3:\d+  14  allow entry \d+: run wiki not given")
+        self.assertRegex(out, r"UNVERIFIED WRITEUP\.md:3:\d+  20  allow entry \d+: run wiki not given")
 
     def test_bad_allow_entries_stop_the_check(self):
         bad = [{"file": "README.md", "text": "5"},
@@ -327,7 +327,7 @@ class ExampleRun(ExampleBase):
         write(os.path.join(run_dir, "checks.json"), json.dumps({"rows": 1, "tokens": 1}))
         code, out = run(["--repo", self.repo, "--run", "example=" + run_dir, "--only", "README.md", "--skip-stale"])
         self.assertEqual(code, 0, out)
-        self.assertIn("left out checks.json (stale: rows 1 vs 14", out)
+        self.assertIn("left out checks.json (stale: rows 1 vs 20", out)
 
     def test_drift_power_is_measured(self):
         allow_with(self.repo, runs={"WRITEUP*": ["example"]}, entries=[
@@ -340,7 +340,7 @@ class ExampleRun(ExampleBase):
         allow = CC.load_allow(os.path.join(self.repo, CC.ALLOW_NAME))
         result = CC.check(self.repo, [path], runs, allow)
         caught = {r["text"]: r["caught"] for r in result["numbers"]}
-        self.assertTrue(caught["14"])  # pinned to load.rows: 13 and 15 fail
+        self.assertTrue(caught["20"])  # pinned to load.rows: 19 and 21 fail
         self.assertTrue(caught["20261003"])  # no other count is 20261002 or 20261004
         self.assertFalse(caught["4"])  # a pattern entry lets any tick through
         self.assertEqual(result["power"]["checked"], 4)

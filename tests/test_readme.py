@@ -59,6 +59,8 @@ class Readme(unittest.TestCase):
                 continue  # file extensions, run outputs, placeholders and the input format, not repo files
             if p in ("facts.json", "trees.jsonl", "top_trees.json", "report.html", "checks.json", "calibration.json"):
                 continue  # names of files a run (or checks / calibrate) writes
+            if "*" in p:
+                continue  # a glob such as docs/*.svg, not one file
             if re.match(r"^pz-[a-z]+/\d+$", p):
                 continue  # a schema id, not a path
             if "/" not in p:
