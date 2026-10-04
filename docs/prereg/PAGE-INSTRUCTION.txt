@@ -1,0 +1,63 @@
+PATIENT-ZERO CALIBRATION: "PAGE INSTRUCTION", A PAGE-WIDE SHARED-CAUSE DECOY -- PRE-REGISTRATION v1
+Written Sat 2026-10-03 17:47 CT by a kirk/ideas workflow agent (Claude), BEFORE any number of this run on the
+real wiki was computed. tools/calibrate.py prints this file's sha256 at start and stores it in the output and
+on the new matrix row. This is a new planted kind added AFTER E7 (kirk/cards/km-run/PREREG.txt, sha256
+e44b7a63...), so it gets its own pre-registration and is labelled "added after E7" (KM-5).
+Code under test: patient-zero ea867f1 plus this change, in a sandbox copy (never the original repo):
+  patient_zero/calibrate.py sha256 ad5fec89...   tools/calibrate.py sha256 8f462120...
+  tests/test_calibrate.py   sha256 14fa85a6...   (24 tests OK on made-up logs; no real-data number seen)
+Nothing here is write-up text.
+
+ALREADY KNOWN WHEN WRITTEN (not hidden):
+  Every E7 cell (kirk/cards/km-run/e7-results.json, sha256 aec986ba...). Same-page contagion (E6): N1 z 9.16,
+  N2 z 10.71, N3 z 0.14 (98 of 100 shuffles at or above), N4 z -17.76, N5 z -85.07, reversed clock fwd/rev 1.00.
+  The KM card's hard ceiling ("same-page copying cannot be told from a page-wide shared cause") rests on reading
+  the E6 generator, not on a run.
+NOT KNOWN: any number for the page instruction on the real background; the paired reversed-clock z of any kind.
+
+GENERATOR (fixed now):
+  page_instruction: random.Random(20261035) draws anchor rows from all agent rows. Page P = the anchor's page,
+  t0 = the anchor's time. Each page is tried once (a later draw of a tried page is skipped).
+  Writers = agents with a save on P in [t0, t0 + 72 h]. Each writer follows with probability 0.35 on its own
+  coin: the first 8 bytes of sha256("20261035" + 0x1F + P + 0x1F + agent label), read as an integer and divided
+  by 2^64, is below 0.35. No other agent, no order and no earlier use enters the coin.
+  A follower's use row is its first save on P in the window (one row per follower). No cap. No planted contact.
+  A page is kept when it has at least 5 followers (E6's floor: a seed plus at least 4 adopters).
+  Stop at 40 pages (budget 20,000 draws). The kind has its own generator, so every E7 planting is unchanged
+  (unit test).
+
+NULLS: as E7: N1 label day, N2 label day x page family, N3 order agent-day (default exposure), N4 order strict,
+  N5 order 120 s lag; 100 shuffles, seed 20261003. The page instruction joins the E7 planted set in the same
+  run; N3 runs it together with the 7,671 real tokens under the same permutations.
+REVERSED CLOCK z (a new statistic, computed for every kind): for each token d = forward named links minus
+  reversed named links; z = mean(d) / (sd(d) / sqrt(n)) over the kind's tokens (a paired t over tokens, the
+  independent units). If every d is equal: z = 0 when d = 0, unbounded otherwise (counts as |z| >= 2).
+
+HARNESS GATES (fixed now). FAIL = STOP: the tool withholds every page-instruction cell (never printed, never
+written); only the mismatch is reported, and that is the result.
+  H0 N3 on the real tokens reproduces E7: observed 28,250; mean 28,377.88 (+-0.01); sd 133.969 (+-0.001).
+  H1 the E6 and exp2 plantings reproduce E7 exactly: contagion 931 linked of 931 true adopters, parent exact
+     68; decoy_fam 140 links; carry 1,041; same 1,073; decoy_bcast 28; decoy_fam2 139.
+  H2 every cell held in e7-results.json (nulls, time reversal, accuracy, power curve, calibration) comes out
+     identical.
+
+PREDICTIONS = PASS LINES (each scored PASS or FAIL and reported either way; never retuned):
+  L1 Both label nulls flag the page instruction as spread: z >= 3 under N1 AND z >= 3 under N2.
+     (They cannot tell it from same-page contagion.)
+  L2 The order null and the reversed clock read nothing: |z| < 2 under N3 AND |z| < 2 on the reversed clock.
+     (N3 z is undefined only if every shuffle gives one count; equal to the observed count, that is |z| < 2.)
+  No prediction for N4, N5, ratios, link counts or parent counts: reported as cells.
+
+WHAT EACH OUTCOME MEANS (written now):
+  L1 PASS and L2 PASS: the ceiling is measured, not asserted. The matrix holds a kind with no contact at all
+     that the label nulls flag like same-page contagion and that the order null and the reversed clock cannot
+     see, exactly as with same-page contagion.
+  L1 FAIL: a label null separates a page-wide cause from same-page contagion on this background. The ceiling
+     line is wrong as written and changes.
+  L2 FAIL: the order null or the reversed clock reads the page instruction (direction reported). The "the
+     order null sees neither" half of the ceiling is wrong as written and changes.
+
+NOT DONE AFTER THE NUMBERS (KM-5): no rerun with another q, horizon, floor, seed, page count or statistic; no
+  line dropped or reworded. A further decoy needs its own pre-registration, labelled as added later.
+PLACEMENT: the row sits directly under "Same-page contagion (E6)" in the matrix (patient_zero/calibrate.py
+  MATRIX_ORDER).
