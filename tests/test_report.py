@@ -431,7 +431,11 @@ class Verdict(unittest.TestCase):
         self.assertNotIn("not proof", text)
         narrow = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 77,
                                 "chance_beats_upper_bound": 75.95, "tokens": 7671}}
-        self.assertIn("at most 0.99", R._lead_text(R.RULE_BEAT, narrow))  # a narrow win reads as narrow
+        self.assertIn("not proof", R._lead_text(R.RULE_BEAT, narrow))  # 76 / 77 = 0.99: a narrow win keeps it
+        lucky = {"nullmodel": {"shuffles": 100, "trees_beating_every_shuffle": 1,
+                               "chance_beats_upper_bound": 0.59, "tokens": 60}}
+        self.assertIn("not proof", R._lead_text(R.RULE_BEAT, lucky))  # one lucky tree, bound 0.59
+        self.assertIn("not proof", " ".join(R.selection_lines(R.RULE_BEAT, lucky)))
 
     def test_note_lines_sit_in_the_public_figure(self):
         d = detail([node(0, 0, "a", "first"), node(1, 5, "a", "linked", 0), node(2, 9, "a", "linked", 1)])

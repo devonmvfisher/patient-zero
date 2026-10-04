@@ -827,17 +827,24 @@ def bound_text(bound):
     return text
 
 
+LUCK_LIMIT = 0.05  # Markov chance at or under which a caption may drop "not proof"
+
+
 def beats_beyond_chance(nm):
     """(beats, bound, luck) when more trees beat every shuffle than the chance bound, else None.
 
     ``luck`` is bound / beats. Each tree beats all N shuffles by luck with
     probability at most 1 / (N + 1), so the expected number of such trees is at
     most ``bound``, and by Markov's inequality luck alone gives ``beats`` or more
-    of them with probability at most ``luck``. Only then does a caption drop its
-    "not proof" line; the number stays printed, so a narrow win reads as narrow.
+    of them with probability at most ``luck``. A caption drops its "not proof"
+    line only when ``luck`` is at most LUCK_LIMIT: with fewer tokens than
+    shuffles the bound is under 1, so one lucky tree in a log with no spread
+    would otherwise beat it (a 60-token null log gave 1 tree against 0.59).
     """
     beats, bound = nm.get("trees_beating_every_shuffle"), beat_bound(nm)
     if not nm.get("shuffles") or beats is None or bound is None or beats <= bound:
+        return None
+    if bound / beats > LUCK_LIMIT:
         return None
     return beats, bound, bound / beats
 
