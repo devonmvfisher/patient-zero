@@ -958,9 +958,8 @@ def whole_run_line(facts, checks=None):
         _num(obs), _num(int(round(f5["links_expected_mean"]))),
         chance_word(obs, f5["links_expected_p05"], f5["links_expected_p95"]))
     on = ((checks_for(facts, checks) or {}).get("order_null") or {}).get("links_named")
-    if on and on.get("mean") is not None:
-        line += "; order null mean %s (%s)" % (_num(int(round(on["mean"]))),
-                                               chance_word(obs, on["p05"], on["p95"]))
+    if on and on.get("mean") is not None:  # no chance word: random rows show this null is not neutral here
+        line += "; order null mean %s (see can-it-see.svg)" % _num(int(round(on["mean"])))
     return line + "."
 
 

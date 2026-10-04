@@ -95,8 +95,10 @@ class Readme(unittest.TestCase):
         trees, bound = numbers(picked)[:2]
         self.assertIn(trees, have)
         self.assertIn(bound, have)
-        self.assertIn("within chance", whole)
-        self.assertIn("within chance", bullet)
+        # the order null is not called "within chance": its random-row controls read below its band
+        self.assertNotIn("within chance", whole)
+        self.assertNotIn("within chance", bullet)
+        self.assertIn("can-it-see.svg", whole)
         self.assertIn("below chance", whole)
         self.assertIn("below chance", bullet)
 

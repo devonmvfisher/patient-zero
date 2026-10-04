@@ -480,7 +480,7 @@ class Verdict(unittest.TestCase):
                          "Whole run: 28,250 named links; label shuffle mean 45,189 (below chance).")
         self.assertEqual(R.whole_run_line(facts, checks),
                          "Whole run: 28,250 named links; label shuffle mean 45,189 (below chance); "
-                         "order null mean 28,378 (within chance).")
+                         "order null mean 28,378 (see can-it-see.svg).")
         for key, bad in (("rows", 1), ("tokens", 1)):
             wrong = dict(checks, **{key: bad})
             self.assertIsNone(R.checks_for(facts, wrong))
@@ -495,7 +495,7 @@ class Verdict(unittest.TestCase):
             "tokens": 7671}), checks)
         self.assertEqual(len(lines), 3)
         self.assertTrue(lines[2].startswith("Whole run: 28,250 named links"))
-        self.assertIn("order null mean 28,378 (within chance)", lines[2])
+        self.assertIn("order null mean 28,378 (see can-it-see.svg)", lines[2])
 
     def test_note_lines_sit_in_the_public_figure(self):
         d = detail([node(0, 0, "a", "first"), node(1, 5, "a", "linked", 0), node(2, 9, "a", "linked", 1)])

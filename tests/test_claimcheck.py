@@ -366,6 +366,11 @@ def _real_run_dir(tmp):
     code = pipeline.main(["--adapter", "wiki", "--input", os.environ["PZ_DATA"], "--out", out], out=io.StringIO())
     if code:
         raise RuntimeError("real pipeline run failed")
+    from patient_zero import checks  # the README and lead.svg quote the order null, so the run needs checks.json
+    code = checks.main(["--adapter", "wiki", "--input", os.environ["PZ_DATA"], "--out",
+                        os.path.join(out, "checks.json"), "--variant-shuffles", "30"], out=io.StringIO())
+    if code:
+        raise RuntimeError("real checks run failed")
     return out
 
 
@@ -379,11 +384,12 @@ class RealRun(ExampleBase):
         super().setUpClass()
         cls.real = _real_run_dir(cls.tmp)
         cls.real_facts = facts(cls.real)
-        # A run built here from PZ_DATA alone has no calibration.json, so the can-it-see figure cannot be
-        # traced; it is checked when PZ_RUN names a full run folder (cli + checks + make_calibration).
+        # A run built here from PZ_DATA alone has no calibration.json, so the README (it quotes the calibration)
+        # and the can-it-see figure cannot be traced; both are checked when PZ_RUN names a full run folder
+        # (cli + checks + make_calibration, as kirk sunday_runs.sh writes it).
         cls.has_calibration = os.path.exists(os.path.join(cls.real, "calibration.json"))
         cls.only = ([] if cls.has_calibration else
-                    ["--only", "README.md", "--only", "docs/lead.svg", "--only", "WRITEUP*"])
+                    ["--only", "docs/lead.svg", "--only", "WRITEUP*"])
 
     def check(self, *extra):
         return super().check("--run", "wiki=" + self.real, *(list(self.only) + list(extra)))
@@ -395,7 +401,7 @@ class RealRun(ExampleBase):
         self.assertRegex(out, r"docs/lead\.svg: \d+ numbers: .* 0 FAIL")
         if self.has_calibration:
             self.assertRegex(out, r"docs/can-it-see\.svg: \d+ numbers: .* 0 FAIL")
-        self.assertRegex(out, r"README\.md: \d+ numbers: .* 0 FAIL")
+            self.assertRegex(out, r"README\.md: \d+ numbers: .* 0 FAIL")
 
     def test_links_count_edit_fails_with_file_line(self):
         links = self.real_facts["cascade"]["links_named"]
@@ -430,7 +436,8 @@ class RealRun(ExampleBase):
         runs = [CC.load_run("example", self.example), CC.load_run("wiki", self.real)]
         allow = CC.load_allow(os.path.join(ROOT, CC.ALLOW_NAME))
         started = time.perf_counter()
-        docs = [d for d in CC.default_docs(ROOT) if self.has_calibration or "can-it-see" not in d]
+        docs = [d for d in CC.default_docs(ROOT)
+                if self.has_calibration or os.path.basename(d) == "lead.svg"]
         result = CC.check(ROOT, docs, runs, allow)
         self.assertLess(time.perf_counter() - started, 2.0)
         self.assertEqual(result["fail"], 0)

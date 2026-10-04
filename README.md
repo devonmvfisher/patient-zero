@@ -8,13 +8,13 @@ Give patient-zero a multi-agent log (who wrote what, when and where). It finds t
 
 - **What it claims:** a tracer that links each later user of a token to an earlier use they could have seen, and tests those links against chance. A link is a candidate, not proof that one agent copied another.
 - **The bar:** the same log with the agents shuffled, so the token set and the link rules stay the same. The planned bar is the label shuffle (agent labels permuted within each UTC day). The order null keeps each agent's own rows and only re-times them within the day; it is the fairer bar, added after the label shuffle's result (`patient_zero/checks.py`).
-- **German wiki run:** the links did not beat either bar. 28,250 named links against a label-shuffle mean of 45,188.7 (below chance, ratio 0.625) and an order-null mean of 28,377.9, sd 134.0 (within chance, ratio 0.995, z -0.95, 83 of 100 shuffles at or above). Per tree: 42 trees beat every label shuffle, where chance alone allows up to 76.
-- **Evidence that it can see spread:** planted known-answer tests find all 3 cascades planted in a made-up log, and no shuffle reaches the planted chain or star (`tests/test_planted.py`, `tests/test_nullmodel.py`). These logs are made up by us; the real wiki has no ground truth. A hand check of 10 random wiki links (`tools/peek.py`) found 2 plausible, 7 coincidence and 1 unclear.
-- **Blind spots:** it sees saves, not reads, and it cannot tell copying from a shared cause such as one instruction on a page. More under **Known limits** below.
+- **German wiki run:** the links did not beat either bar. 28,250 named links against a label-shuffle mean of 45,188.7 (below chance, ratio 0.625) and an order-null mean of 28,377.9, sd 134.0 (ratio 0.995, z -0.95, 83 of 100 shuffles at or above). The order null is not neutral on this log: 400 tokens put on random rows, with no structure at all, read 0.930 of its mean on all pairs and 0.858 on cross-page pairs, both below its band. So neither the all-pairs ratio nor the cross-page ratio (0.916) is evidence of chance, of spread, or of its absence. Per tree: 42 trees beat every label shuffle, where chance alone allows up to 76.
+- **Evidence that it can see spread, and where it cannot:** kinds planted on the wiki's own rows (real agents, pages and times; only the token placement is planted) give known answers on the real background (`tools/calibrate.py`). Carried spread (seen on one page, used later on another) reads 1,041 pairs against an order-null mean of 599.95, far above the band. Added to the real tokens, carry is caught in all 5 draws from 60 cascades up, a median of 1,603 planted links (5.67% of the real links), and missed in every draw at 40 (`patient_zero/inject.py`). Same-page spread and a page-instruction decoy with no contact at all both read 1.000, inside the band: this bar is blind to same-page spread and cannot tell it from a shared cause. The made-up known-answer tests find all 3 cascades planted in a made-up chat log, and no shuffle reaches the planted chain or star (`tests/test_planted.py`, `tests/test_nullmodel.py`). A hand check of 10 random wiki links (`tools/peek.py`) found 2 plausible, 7 coincidence and 1 unclear.
+- **Blind spots:** it sees saves, not reads, and it cannot tell copying from a shared cause such as one instruction on a page (measured above: that decoy reads exactly like same-page spread). Its order null reads tokens with no structure below 1, so a real reading near 1 is not proof of chance. More under **Known limits** below.
 
-![Lead spread tree from a run on the German wiki export](docs/lead.svg)
+![Can it see? Did it see? Planted kinds and the real wiki on one axis](docs/can-it-see.svg)
 
-*`docs/lead.svg`: one tree from a run on the German wiki export. It holds summary data only: no agent names and no token text. The figure itself says how the tree was picked, how many trees chance alone would let through, and how the whole run did against both bars.*
+*`docs/can-it-see.svg`: one test (the order null), one axis, every row on the same shuffles. Top: kinds planted on the wiki's own rows, so the answer is known. Bottom: the real wiki, each reading with a no-structure control under it. Counts only; `tools/figcheck.py --sources` checks every printed number, dot, band and row verdict against the two run files named in its footer (it does not vet free caption text). One spread tree from the same run is under **What a run writes**.*
 
 ## Run it in two commands (no data needed)
 
@@ -61,7 +61,13 @@ Writers never overwrite their own inputs. `cli.py --out`, `checks --out`, `tools
 | `top_trees.json` | Node-level detail for the lead tree, the largest tree and the top trees |
 | `report.html` | The offline report. Under the key numbers it gives a plain-words verdict against the shuffle: above, within or below chance |
 
-`report.html` is a **local working view**: it shows escaped agent labels and token text, so review it before sharing a screenshot. `docs/lead.svg` is the public figure. To change the lead tree or redraw the figure without re-running:
+`report.html` is a **local working view**: it shows escaped agent labels and token text, so review it before sharing a screenshot. `docs/lead.svg` is a public figure of one tree:
+
+![Lead spread tree from a run on the German wiki export](docs/lead.svg)
+
+*`docs/lead.svg`: one tree from a run on the German wiki export. It holds summary data only: no agent names and no token text. The figure itself says how the tree was picked, how many trees chance alone would let through, and how the whole run did against both bars.*
+
+To change the lead tree or redraw that figure without re-running:
 
 ```
 python -m patient_zero.report --out out/wiki --lead TOKEN_ID --svg docs/lead.svg
@@ -141,7 +147,7 @@ patient-zero: ERROR: examples/fake_log.csv has no column 'usr' (--map agent=usr)
 python -m unittest
 ```
 
-The planted known-answer tests are the evidence that the tool can see spread: `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. `tests/test_hostile.py` feeds 11 odd made-up logs (byte-order marks, UTF-16, cp1252, a blank line, bad times, a null agent, a number as text, a duplicate id, a cut-off line) to every command that reads a log, and points every writer at its own input: no traceback, and no input changes. The suite runs in about 40 seconds without data (longer on a busy machine). Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`. The claim check's real-run tests run only when `PZ_RUN` names a real run's output folder, or when `PZ_DATA` is set (the pipeline then runs first); they check the can-it-see figure only when that folder also holds `calibration.json`.
+The planted known-answer tests are the evidence that the tool can see spread: `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. `tests/test_hostile.py` feeds 11 odd made-up logs (byte-order marks, UTF-16, cp1252, a blank line, bad times, a null agent, a number as text, a duplicate id, a cut-off line) to every command that reads a log, and points every writer at its own input: no traceback, and no input changes. The suite runs in about 40 seconds without data (longer on a busy machine). Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`. The claim check's real-run tests run only when `PZ_RUN` names a real run's output folder (with its `checks.json`), or when `PZ_DATA` is set (the pipeline and the checks then run first, a few minutes); they check the README and the can-it-see figure only when that folder also holds `calibration.json`.
 
 ## Data handling
 

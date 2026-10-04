@@ -177,6 +177,52 @@ class Refusals(unittest.TestCase):
         self.fails(cal, crossgrid_doc(), "has no p95")
 
 
+def inject_doc():
+    def mdc(k, med):
+        return {"k": k, "reached_in_grid": True, "planted_links_median": med, "planted_links_min": med - 1,
+                "planted_links_max": med + 1, "pct_of_reference_median": 3.1, "pct_of_reference_min": 2.9,
+                "pct_of_reference_max": 3.3}
+    return {"tool": "patient-zero inject", "seed": 7, "shuffles": 100, "rows": 1000, "real_tokens": 70,
+            "scope": "agent_day", "real": {"aggregate": {k: REAL[k] for k in ("observed", "mean", "sd")}},
+            "rates": {"replicates": 5, "need": 4, "rule": "detected in at least 4 of 5 draws",
+                      "aggregate": {"rates": [{"k": 40, "extension": False, "detected": 0, "planted_links_median": 10,
+                                               "planted_links_min": 9, "planted_links_max": 12},
+                                              {"k": 60, "extension": False, "detected": 5, "planted_links_median": 16}],
+                                    "minimum_detectable_carry": mdc(60, 16)},
+                      "cross_page": {"rates": [{"k": 80, "extension": False, "detected": 0, "planted_links_median": 20},
+                                               {"k": 100, "extension": False, "detected": 5}],
+                                     "minimum_detectable_carry": mdc(100, 27)}}}
+
+
+class DetectionLimit(unittest.TestCase):
+    def test_copied_with_the_largest_amount_missed(self):
+        d = M.detection_limit(inject_doc(), calibrate_doc())
+        self.assertEqual((d["replicates"], d["need"]), (5, 4))
+        self.assertEqual(d["aggregate"]["k"], 60)
+        self.assertEqual(d["aggregate"]["planted_links_median"], 16)
+        self.assertEqual(d["aggregate"]["missed_by_every_draw"]["k"], 40)
+        self.assertEqual(d["cross_page"]["k"], 100)
+        self.assertEqual(d["cross_page"]["missed_by_every_draw"]["k"], 80)
+
+    def test_refuses_another_null_or_other_data(self):
+        for key, value in (("seed", 8), ("shuffles", 30), ("rows", 999), ("real_tokens", 71), ("scope", "day")):
+            inj = inject_doc()
+            inj[key] = value
+            with self.assertRaises(M.CalibrationError, msg=key):
+                M.detection_limit(inj, calibrate_doc())
+        inj = inject_doc()
+        inj["real"]["aggregate"]["mean"] = 520.6
+        with self.assertRaises(M.CalibrationError):
+            M.detection_limit(inj, calibrate_doc())
+        with self.assertRaises(M.CalibrationError):
+            M.detection_limit(crossgrid_doc(), calibrate_doc())
+
+    def test_no_limit_reached_is_refused(self):
+        inj = inject_doc()
+        inj["rates"]["aggregate"]["minimum_detectable_carry"] = {"k": None, "reached_in_grid": False}
+        with self.assertRaises(M.CalibrationError):
+            M.detection_limit(inj, calibrate_doc())
+
 class Cli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="pz-makecal-")
@@ -191,6 +237,17 @@ class Cli(unittest.TestCase):
     def args(self, out):
         return ["--calibrate", self.paths["calibrate.json"], "--crossgrid", self.paths["crossgrid.json"],
                 "--checks", self.paths["checks.json"], "--out", out]
+
+    def test_inject_goes_under_detection_limit(self):
+        path = os.path.join(self.tmp, "inject.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(inject_doc(), fh)
+        out = os.path.join(self.tmp, "calibration.json")
+        code, text = run(self.args(out) + ["--inject", path])
+        self.assertEqual(code, 0, text)
+        doc = json.loads(_bytes(out))
+        self.assertEqual(doc["detection_limit"]["aggregate"]["k"], 60)
+        self.assertIn("inject.json", [s["name"] for s in doc["sources"]])
 
     def test_writes_same_bytes_twice(self):
         out = os.path.join(self.tmp, "calibration.json")

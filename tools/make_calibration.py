@@ -10,6 +10,8 @@ Reads, never writes:
 ``--crossgrid``  the output of ``python -m patient_zero.crossgrid`` (the real links split into
                  cross-page and same-page under that null, plus its random-row controls).
 ``--checks``     optional: checks.json, to stop here if its order null is not the same run.
+``--inject``     optional: the output of ``python -m patient_zero.inject``; its minimum detectable carry
+                 is copied under ``detection_limit`` (same null, rows and tokens, or it stops).
 
 Writes ``--out`` (outside the repo, or in its git-ignored out/)::
 
@@ -170,6 +172,39 @@ def build(cal, grid, checks=None, sources=None):
     return doc
 
 
+def detection_limit(inj, cal):
+    """The detection limit from a patient_zero.inject run on the same rows, tokens and order null."""
+    if inj.get("tool") != "patient-zero inject":
+        raise CalibrationError("--inject is not a patient_zero.inject output")
+    same = [("seed", cal.get("seed")), ("shuffles", cal.get("shuffles")), ("rows", cal.get("rows")),
+            ("real_tokens", cal.get("real_tokens")), ("scope", "agent_day")]
+    bad = ["%s %s vs %s" % (k, inj.get(k), v) for k, v in same if inj.get(k) != v]
+    if bad:
+        raise CalibrationError("the inject run used another null or other data: " + "; ".join(bad))
+    agg = (inj.get("real") or {}).get("aggregate") or {}
+    if any(agg.get(k) != (cal.get("H0") or {}).get(k) for k in ("observed", "mean", "sd")):
+        raise CalibrationError("the inject run's real all-links cell does not equal the calibrate run's H0")
+    rates = inj.get("rates") or {}
+    out = {"what": "planted carry cascades added to the real tokens, one independent draw per plant seed",
+           "replicates": rates.get("replicates"), "need": rates.get("need"), "rule": rates.get("rule")}
+    for stat in ("aggregate", "cross_page"):
+        r = rates.get(stat) or {}
+        mdc = r.get("minimum_detectable_carry")
+        if not isinstance(mdc, dict) or not isinstance(mdc.get("k"), int):
+            raise CalibrationError("the inject run has no minimum detectable carry for %s" % stat)
+        entry = {k: mdc[k] for k in ("k", "planted_links_median", "planted_links_min", "planted_links_max",
+                                      "pct_of_reference_median", "pct_of_reference_min", "pct_of_reference_max")
+                 if k in mdc}
+        missed = [x for x in r.get("rates") or [] if not x.get("extension") and x.get("detected") == 0
+                  and x.get("k", 0) < mdc["k"]]
+        if missed:
+            top = max(missed, key=lambda x: x["k"])
+            entry["missed_by_every_draw"] = {k: top[k] for k in ("k", "planted_links_median", "planted_links_min",
+                                                                  "planted_links_max") if k in top}
+        out[stat] = entry
+    return out
+
+
 def main(argv=None, out=None):
     out = out or sys.stdout
     ap = argparse.ArgumentParser(description="calibration.json for docs/can-it-see.svg from a calibrate run "
@@ -177,9 +212,10 @@ def main(argv=None, out=None):
     ap.add_argument("--calibrate", required=True, help="tools/calibrate.py output")
     ap.add_argument("--crossgrid", required=True, help="python -m patient_zero.crossgrid output")
     ap.add_argument("--checks", help="checks.json (optional cross-check of the order null)")
+    ap.add_argument("--inject", help="python -m patient_zero.inject output (optional: the detection limit)")
     ap.add_argument("--out", required=True, help="calibration.json, outside the repo or in its out/ folder")
     args = ap.parse_args(argv)
-    inputs = [args.calibrate, args.crossgrid, args.checks]
+    inputs = [args.calibrate, args.crossgrid, args.checks, args.inject]
     try:
         from patient_zero.pipeline import check_out_dir  # late import: pipeline imports report
         check_out_dir(os.path.dirname(os.path.abspath(args.out)))
@@ -189,6 +225,8 @@ def main(argv=None, out=None):
         checks = _read(args.checks, "--checks") if args.checks else None
         sources = [{"name": os.path.basename(p), "sha256": sha256_file(p)} for p in inputs if p]
         doc = build(cal, grid, checks, sources)
+        if args.inject:
+            doc["detection_limit"] = detection_limit(_read(args.inject, "--inject"), cal)
     except (OSError, ValueError) as exc:
         print("make_calibration: ERROR: %s" % exc, file=out)
         return 2
