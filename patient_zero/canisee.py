@@ -39,6 +39,12 @@ tag (the first 12 hex of the SHA-256 of its id), its seed and shuffle count,
 and the SHA-256 of both input files. ``--skip-pending`` leaves out a row whose
 numbers do not exist yet.
 
+The row labels and section titles say "real wiki", which is right for the
+published figure and for no other log. ``--subject "this log"`` (or any short
+plain name) puts that name there instead; ``tools/can_it_see.py`` always passes
+it, so "real wiki" is never printed on a log that is not the wiki export. The
+default leaves every byte of the published figure as it is.
+
 Visible words were checked against the wiki export with
 ``tools/labelscan.py``: a few plain English words that some agent also used as
 its label or as a control word are avoided (the scan finds 0), so the figure
@@ -107,6 +113,8 @@ ROWS = (
         "control: random rows, cross-page", False),
 )
 SECTIONS = (("can", "Can it see? Planted on the real wiki"), ("did", "Did it see? The real wiki"))
+SUBJECT = "real wiki"  # what the labels above call the log: right for the published figure and no other log
+SUBJECT_MAX = 40
 WORDS = {
     "contact": {"above": "seen", "inside": "blind spot", "below": "reads the wrong way"},
     "decoy": {"above": "wrongly flagged", "inside": "not flagged", "below": "not flagged"},
@@ -176,13 +184,40 @@ def role_of(row, calibration):
     return "contact" if kind["contact"] else "decoy"
 
 
+def check_subject(subject):
+    """A short plain name for the log (letters, digits, spaces, hyphens). Raises CanISeeError."""
+    ok = isinstance(subject, str) and 0 < len(subject) <= SUBJECT_MAX and subject == subject.strip()
+    if not ok or any(not (ch.isalnum() or ch in " -") for ch in subject):
+        raise CanISeeError("--subject must be 1 to %d letters, digits, spaces or hyphens" % SUBJECT_MAX)
+    return subject
+
+
+def label_for(row, subject=SUBJECT):
+    """The row's label with the log called ``subject``; the default leaves every label as it is."""
+    if subject == SUBJECT or not row.label.startswith(SUBJECT + ": "):
+        return row.label
+    return subject + row.label[len(SUBJECT):]
+
+
+def sections_for(subject=SUBJECT):
+    """The two section titles with the log called ``subject``; the default leaves them as they are."""
+    if subject == SUBJECT:
+        return SECTIONS
+    return (("can", "Can it see? Planted on %s" % subject),
+            ("did", "Did it see? %s%s" % (subject[:1].upper(), subject[1:])))
+
+
 def verdict(role, position):
     word = WORDS[role].get(position)
     return "%s the band%s" % (position, (": " + word) if word else "")
 
 
-def build_rows(calibration, checks):
-    """The rows to draw, after the same-null checks. Raises CanISeeError."""
+def build_rows(calibration, checks, subject=SUBJECT):
+    """The rows to draw, after the same-null checks. Raises CanISeeError.
+
+    ``subject`` names the log on the two rows and the section titles that say "real wiki" by default.
+    """
+    check_subject(subject)
     if calibration.get("schema") != SCHEMA:
         raise CanISeeError("calibration.json schema is %r, not %r" % (calibration.get("schema"), SCHEMA))
     cal_null = calibration.get("null") or {}
@@ -206,7 +241,8 @@ def build_rows(calibration, checks):
     rows = []
     for row in ROWS:
         cell = _get(docs[row.source], row.path)
-        entry = {"row": row, "null": ident, "role": role_of(row, calibration) if cell else None}
+        entry = {"row": row, "null": ident, "role": role_of(row, calibration) if cell else None,
+                 "label": label_for(row, subject)}
         if cell is None:
             if row.required:
                 raise CanISeeError("%s has no %s" % (row.source, ".".join(row.path)))
@@ -262,12 +298,14 @@ def _text(x, y, s, size, fill, anchor="start", weight=None, cls=None, ident=None
     return "<text %s>%s</text>" % (" ".join(attrs), _e(s))
 
 
-def draw(calibration, checks, hashes, skip_pending=False):
+def draw(calibration, checks, hashes, skip_pending=False, subject=SUBJECT):
     """The figure as an SVG string. hashes: {"calibration.json": sha256, "checks.json": sha256}.
 
     skip_pending leaves out rows whose numbers do not exist yet instead of drawing them as "not run yet".
+    subject names the log (default "real wiki", the published figure; any other log needs its own name).
     """
-    rows = [r for r in build_rows(calibration, checks) if not (skip_pending and r["status"] == "pending")]
+    rows = [r for r in build_rows(calibration, checks, subject)
+            if not (skip_pending and r["status"] == "pending")]
     lo_t, hi_t, label_t, grid_t = axis(rows)
     lo, hi = lo_t / 10.0, hi_t / 10.0
 
@@ -281,7 +319,7 @@ def draw(calibration, checks, hashes, skip_pending=False):
              _text(24, 96, "Grey band: 5th to 95th percentile of %d shuffles." % shuffles, SIZE_SMALL, INK2,
                    cls="cis-sub")]
     y = 112
-    for section, heading in SECTIONS:
+    for section, heading in sections_for(subject):
         y += 34
         parts.append(_text(24, y, heading, SIZE_SECTION, INK, weight="600", cls="cis-section"))
         y += 8
@@ -327,7 +365,7 @@ def _row(r, top, X, lo_t, hi_t, grid_t):
         attrs.append('data-role="%s"' % r["role"])
         attrs += ['data-%s="%s"' % (k, _e(repr(r["cell"][k]))) for k in CELL_KEYS]
     centre = top + 40
-    out = [_text(24, top + 18, row.label, SIZE_LABEL, INK, weight="600", cls="cis-label")]
+    out = [_text(24, top + 18, r["label"], SIZE_LABEL, INK, weight="600", cls="cis-label")]
     t = lo_t
     while t <= hi_t:  # short grid marks inside the track, on the shared axis
         if (t - lo_t) % grid_t == 0:
@@ -364,9 +402,9 @@ def summary(rows):
     lines = []
     for r in rows:
         if r["status"] == "pending":
-            lines.append("%s: not run yet" % r["row"].label)
+            lines.append("%s: not run yet" % r["label"])
         else:
-            lines.append("%s: %s vs %s, %.3f, %s" % (r["row"].label, _fmt(r["cell"]["observed"]),
+            lines.append("%s: %s vs %s, %.3f, %s" % (r["label"], _fmt(r["cell"]["observed"]),
                                                     _fmt(r["cell"]["mean"]), r["ratio"], r["verdict"]))
     return lines
 
@@ -387,17 +425,22 @@ def main(argv=None, out=None):
     ap.add_argument("--svg", default=os.path.join(REPO, "docs", "can-it-see.svg"))
     ap.add_argument("--skip-pending", action="store_true",
                     help="leave out rows with no numbers yet (default: draw them as 'not run yet')")
+    ap.add_argument("--subject", default=SUBJECT,
+                    help="what the labels call the log (default '%s', right only for the German wiki export; "
+                         "for any other log give its own name, such as 'this log')" % SUBJECT)
     args = ap.parse_args(argv)
     try:
         if not args.svg.lower().endswith(".svg"):
             raise CanISeeError("--svg must name a .svg file")
+        check_subject(args.subject)
         with open(args.calibration, encoding="utf-8") as fh:
             calibration = json.load(fh)
         with open(args.checks, encoding="utf-8") as fh:
             checks = json.load(fh)
         hashes = {"calibration.json": sha256_file(args.calibration), "checks.json": sha256_file(args.checks)}
-        svg = draw(calibration, checks, hashes, skip_pending=args.skip_pending)
-        rows = [r for r in build_rows(calibration, checks) if not (args.skip_pending and r["status"] == "pending")]
+        svg = draw(calibration, checks, hashes, skip_pending=args.skip_pending, subject=args.subject)
+        rows = [r for r in build_rows(calibration, checks, args.subject)
+                if not (args.skip_pending and r["status"] == "pending")]
         os.makedirs(os.path.dirname(os.path.abspath(args.svg)), exist_ok=True)
         _write_atomic(args.svg, svg)
     except (OSError, ValueError) as exc:

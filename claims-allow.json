@@ -124,12 +124,6 @@
   },
   {
    "file": "README.md",
-   "at": "about {} seconds",
-   "text": "40",
-   "reason": "suite time without data (kirk plan trial, S01-S14: 489 tests in 40.9 s on a machine shared with other agents)"
-  },
-  {
-   "file": "README.md",
    "at": "PZ_FIGCHECK={}",
    "text": "1",
    "reason": "the value of an environment switch, not a measurement"
@@ -323,6 +317,24 @@
    "file": "docs/can-it-see.svg",
    "at": "^{}$",
    "reason": "tick labels on the can-it-see figure's one ratio axis; they mark the axis, they are not findings (tools/figcheck.py --sources checks each tick sits at its value)"
+  },
+  {
+   "file": "README.md",
+   "at": "made-up** log ({} rows of plain words",
+   "from": "{code:tools/can_it_see.py:DEMO_ROWS}",
+   "reason": "rows in the made-up demo log that tools/can_it_see.py --demo writes (pinned by tests/test_can_it_see.py)"
+  },
+  {
+   "file": "README.md",
+   "at": "plain words from {} invented agents",
+   "from": "{code:tools/can_it_see.py:DEMO_AGENTS}",
+   "reason": "invented agents in the made-up demo log (pinned by tests/test_can_it_see.py)"
+  },
+  {
+   "file": "README.md",
+   "at": "agents on {} invented boards",
+   "from": "{code:tools/can_it_see.py:DEMO_PLACES}",
+   "reason": "invented boards in the made-up demo log (pinned by tests/test_can_it_see.py)"
   }
  ]
 }
