@@ -44,7 +44,7 @@ A full run takes 1 to 5 minutes on one laptop. We measured 45 s to 299 s dependi
 
 | File | What it holds |
 |---|---|
-| `facts.json` | Counts only. Input names, sizes and hashes; parameters; loader, token and tree counts; the shuffle baseline; scores; run times; `core_sha256` |
+| `facts.json` | Counts only. Input names, sizes and hashes (plus the format and `--map`, when used); parameters; loader, token and tree counts; the shuffle baseline; scores; run times; `core_sha256` |
 | `trees.jsonl` | One summary line per spread tree, biggest first. Agent labels are escaped and cut to 80 characters; no row text |
 | `top_trees.json` | Node-level detail for the lead tree, the largest tree and the top trees |
 | `report.html` | The offline report. Under the key numbers it gives a plain-words verdict against the shuffle: above, within or below chance |
@@ -67,6 +67,41 @@ Write JSON Lines (`.jsonl` or `.ndjson`, gzipped or not), one event per line:
 - **Optional:** `id`, `group`, `family` (used for colours and the flow table), `uncertainty_seconds`, `time_grade`, and `human: true` for a human speaker.
 
 Human speakers and blank labels are exposure-only: others can see what they wrote, but they are never named and never credited. If you have a shared goal or prompt text, pass it with `--given FILE`: tokens from it are dropped, because they were handed down, not spread. `python cli.py --help` lists every option.
+
+**Your export uses other names? Map them, don't rename them.** `--map field=column,...` names your column for each field. Fields you leave out are read under their own names. Only those columns, and the other fields under their own names, are read; every other column is dropped while parsing.
+
+A CSV or TSV file (`.csv`, `.tsv`, gzipped or not) is read with Python's `csv` module, header line first. Empty cells in optional columns count as absent, and `human` is true for `true`, `yes` or `1`. From `examples/fake_log.csv`, the made-up example log as CSV:
+
+```
+id,ts,channel,user,body,group,family,human,uncertainty_seconds
+e01,2026-01-10T09:00:00Z,board/plans,Wren,Morning plan: sort the reading list and post a summary by noon.,demo,planning,,
+```
+
+```
+python cli.py --adapter generic --input examples/fake_log.csv --out out/csv --map agent=user,time=ts,place=channel,text=body
+```
+
+This gives the same `facts.json` as the JSON Lines example in every core section except `input`, which records the format and the map.
+
+In nested JSON, a dotted path walks into objects (`agent=author.name`). A key that itself holds a dot is matched as-is first. Here is one line of `examples/fake_slack.ndjson`, the same made-up log as Slack Events API envelopes:
+
+```
+{"type": "event_callback", "team_id": "T0DEMO", "event": {"type": "message", "client_msg_id": "e01", "user": "U01WREN", "channel": "C01PLANS", "text": "Morning plan: sort the reading list and post a summary by noon.", "ts": "1768035600.000100"}}
+```
+
+```
+python cli.py --adapter generic --input examples/fake_slack.ndjson --out out/slack --map id=event.client_msg_id,agent=event.user,time=event.ts,place=event.channel,text=event.text
+```
+
+Slack's `ts` is POSIX seconds written as text, which works as it is (seconds only: milliseconds are not detected). Slack messages carry no human flag, so this example leaves out the human speaker's line. In your own log, map a column that is true for human speakers (`human=COLUMN`), or they will be counted as agents.
+
+If a column named in `--map` is not in the log, the run stops with exit code 2 and one sentence that names the column, and it writes nothing:
+
+```
+patient-zero: ERROR: examples/fake_log.csv has no column 'usr' (--map agent=usr). Its columns are: id, ts, channel, user, body, group, family, human, uncertainty_seconds.
+```
+
+`python -m patient_zero.checks` and `tools/peek.py` take the same `--map`.
 
 ## How it works
 

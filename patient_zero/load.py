@@ -20,12 +20,27 @@ Python standard library only. Two adapters:
     line with ``agent``, ``time``, ``place`` and ``text``. Optional fields:
     ``id``, ``uncertainty_seconds``, ``group``, ``family``, ``time_grade`` and
     ``human`` (true marks a human speaker). ``time`` is an ISO-8601 string
-    (no zone means UTC) or POSIX seconds.
+    (no zone means UTC) or POSIX seconds (a number, or a string of digits
+    such as Slack's ``"1768039200.000100"``).
+
+    A ``.csv`` or ``.tsv`` file (optionally gzipped) is read with the
+    standard ``csv`` module: a header line, then one event per line. Empty
+    cells in optional columns count as absent; ``human`` is true for
+    ``true``, ``yes`` or ``1``.
+
+    ``field_map`` (``--map agent=user,time=ts,place=channel,text=body``)
+    names the log's own column for each field, so an export need not be
+    renamed first. In JSON a dotted path walks into nested objects
+    (``author.name``); a key that itself holds a dot is matched as-is first.
+    Fields left out of the map are read under their own names. A mapped
+    column that the log does not have is an error that names the column.
 
 Privacy rules applied at load, in both adapters:
 
 * Fields are read from a fixed whitelist while parsing; every other field
   (including the export's half-IP field) is discarded before a row exists.
+  With ``field_map`` the whitelist is the mapped columns (and each part of
+  a dotted path) plus the unmapped fields' own names.
 * IP-shaped strings (IPv4, IPv4 with ``x``/``*`` wildcards, IPv6) in text and
   place names are replaced with ``[ip]``. An IP-shaped agent label is treated
   as blank. Two-octet fragments cannot be told from decimals and are not
@@ -39,23 +54,31 @@ Usage::
 
     rows, stats = load("wiki", "path/to/collusion")
     rows, stats = load("generic", "examples/fake_log.ndjson")
+    rows, stats = load("generic", "examples/fake_log.csv",
+                       parse_map("agent=user,time=ts,place=channel,text=body"))
 
     python -m patient_zero.load --adapter wiki --input path/to/collusion
+    python -m patient_zero.load --adapter generic --input chat.csv --map agent=user,text=body
 
 The command line prints counts only, never text or names.
 """
 
 import argparse
+import contextlib
+import csv
 import datetime
 import difflib
 import gzip
 import ipaddress
 import json
+import math
 import os
 import re
 import sys
 from collections import Counter
 from typing import NamedTuple, Optional
+
+from patient_zero.safe import short
 
 ADDED_OPS = ("insert", "replace")
 IP_MASK = "[ip]"
@@ -71,11 +94,15 @@ _REVISION_KEYS = frozenset(
 )
 _PAGE_KEYS = frozenset(("page_id", "page_family"))
 _LABEL_KEYS = frozenset(("label", "is_human_handle"))
-_GENERIC_KEYS = frozenset(
-    ("id", "agent", "time", "place", "text", "uncertainty_seconds", "group", "family",
-     "time_grade", "human")
-)
+_GENERIC_FIELDS = ("agent", "time", "place", "text", "id", "group", "family", "uncertainty_seconds",
+                   "time_grade", "human")
+_GENERIC_KEYS = frozenset(_GENERIC_FIELDS)
 _GENERIC_REQUIRED = ("agent", "time", "place", "text")
+_MISSING = object()  # a field the event does not have
+_CSV_TRUE = frozenset(("true", "yes", "1"))
+_CSV_FALSE = frozenset(("false", "no", "0", ""))
+_CSV_FIELD_LIMIT = 1 << 24  # characters per cell (the csv default, 131072, is too small for long posts)
+_COLUMNS_SHOWN = 20
 
 
 class Row(NamedTuple):
@@ -187,8 +214,15 @@ def _read_json_lines(path, keys):
                 yield number, obj
 
 
+_SECONDS_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)\Z")
+
+
 def parse_time(value):
-    """ISO-8601 string (Z or offset; none means UTC) or POSIX seconds -> float."""
+    """ISO-8601 string (Z or offset; none means UTC) or POSIX seconds -> float.
+
+    POSIX seconds may be a number or a string of digits with an optional
+    fraction (CSV cells, Slack's ``ts``). Milliseconds are not detected.
+    """
     if isinstance(value, bool):
         raise ValueError("time must be a string or a number")
     if isinstance(value, (int, float)):
@@ -196,6 +230,8 @@ def parse_time(value):
     if not isinstance(value, str) or not value.strip():
         raise ValueError("time must be a string or a number")
     text = value.strip()
+    if _SECONDS_RE.match(text):
+        return float(text)
     if text.endswith(("Z", "z")):
         text = text[:-1] + "+00:00"
     stamp = datetime.datetime.fromisoformat(text)
@@ -355,67 +391,276 @@ def load_wiki(data_dir):
 # ---------------------------------------------------------------- generic adapter
 
 
-def load_generic(path):
-    """Load a JSON Lines log with agent, time, place, text. Returns (rows, stats)."""
+def parse_map(spec):
+    """``"agent=user,time=ts,place=channel,text=body"`` -> ``{"agent": "user", ...}``.
+
+    Keys are patient-zero's field names; values are the log's own column
+    names, or dotted paths into nested JSON objects (``author.name``). An empty
+    or missing spec gives ``{}``. Column names cannot hold ``,`` or ``=``.
+    """
+    if spec is None or not spec.strip():
+        return {}
+    out = {}
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        field, sep, source = part.partition("=")
+        field, source = field.strip(), source.strip()
+        if not sep or not field or not source:
+            raise ValueError("--map entry %r should look like field=column, for example agent=user"
+                             % short(part))
+        if field not in _GENERIC_KEYS:
+            raise ValueError("--map: %r is not a field patient-zero reads; the fields are %s"
+                             % (short(field), ", ".join(_GENERIC_FIELDS)))
+        if field in out:
+            raise ValueError("--map names %s twice" % field)
+        if any(not piece for piece in source.split(".")):
+            raise ValueError("--map %s=%s: a dotted path cannot have an empty part" % (field, short(source)))
+        out[field] = source
+    return out
+
+
+def generic_format(path):
+    """'csv', 'tsv' or 'jsonl' (anything else), from the file name; a .gz ending is ignored."""
+    name = path.lower()
+    if name.endswith(".gz"):
+        name = name[:-3]
+    if name.endswith(".csv"):
+        return "csv"
+    if name.endswith(".tsv"):
+        return "tsv"
+    return "jsonl"
+
+
+def _sources(field_map):
+    """Field -> the column it is read from (its own name unless the map says otherwise)."""
+    return {f: (field_map or {}).get(f, f) for f in _GENERIC_FIELDS}
+
+
+def _resolve(obj, source):
+    """obj[source] if that key exists, else walk a dotted path; _MISSING when absent."""
+    if source in obj:
+        return obj[source]
+    value = obj
+    for piece in source.split("."):
+        if not isinstance(value, dict) or piece not in value:
+            return _MISSING
+        value = value[piece]
+    return value
+
+
+def _column_list(header):
+    names = [short(h, 40) for h in header[:_COLUMNS_SHOWN]]
+    more = len(header) - len(names)
+    return ", ".join(names) + (" and %d more" % more if more > 0 else "")
+
+
+def _no_column(path, where, field, source, field_map, header=None):
+    """The plain sentence for a column the log does not have."""
+    if field in (field_map or {}):
+        msg = "%s%s has no column '%s' (--map %s=%s)." % (path, where, short(source), field, short(source))
+    else:
+        msg = ("%s%s has no column '%s'; if the log calls it something else, name that column with "
+               "--map %s=COLUMN." % (path, where, field, field))
+    if header is not None:
+        msg += " Its columns are: %s." % (_column_list(header) or "(none)")
+    return msg
+
+
+def _json_records(path, sources):
+    """Yield ('line N', N, {field: value or _MISSING}) from a JSON Lines log."""
+    keep = set()
+    for source in sources.values():
+        keep.add(source)
+        keep.update(source.split("."))
+    for number, obj in _read_json_lines(path, frozenset(keep)):
+        yield "line %d" % number, number, {f: _resolve(obj, s) for f, s in sources.items()}
+
+
+def _csv_records(path, sources, field_map, delimiter):
+    """Yield ('line N', N, {field: string or _MISSING}) from a CSV or TSV log with a header line.
+
+    Only the needed columns are copied out of each line. Empty cells in
+    optional columns are _MISSING.
+    """
+    old_limit = csv.field_size_limit()
+    csv.field_size_limit(max(old_limit, _CSV_FIELD_LIMIT))
+    opener = gzip.open if path.lower().endswith(".gz") else open
+    try:
+        with opener(path, "rt", encoding="utf-8-sig", newline="") as fh:
+            reader = csv.reader(fh, delimiter=delimiter)
+            try:
+                header = [h.strip() for h in next(reader)]
+            except StopIteration:
+                return
+            for f in list(_GENERIC_REQUIRED) + [f for f in _GENERIC_FIELDS if f in (field_map or {})]:
+                if sources[f] not in header:
+                    raise ValueError(_no_column(path, "", f, sources[f], field_map, header))
+            cols = {}
+            for f, source in sources.items():
+                if source in header:
+                    if header.count(source) > 1:
+                        raise ValueError("%s: column '%s' appears %d times in the header line; rename one "
+                                         "of them" % (path, short(source), header.count(source)))
+                    cols[f] = header.index(source)
+            for cells in reader:
+                if not any(cell.strip() for cell in cells):
+                    continue
+                record = {}
+                for f in _GENERIC_FIELDS:
+                    i = cols.get(f)
+                    value = cells[i] if i is not None and i < len(cells) else _MISSING
+                    if f not in _GENERIC_REQUIRED and value is not _MISSING and not value.strip():
+                        value = _MISSING
+                    record[f] = value
+                yield "line %d" % reader.line_num, reader.line_num, record
+    except csv.Error as exc:
+        raise ValueError("%s: not valid CSV (%s)" % (path, exc)) from None
+    finally:
+        csv.field_size_limit(old_limit)
+
+
+def _csv_human(value, path, where):
+    word = value.strip().lower()
+    if word in _CSV_TRUE:
+        return True
+    if word in _CSV_FALSE:
+        return False
+    raise ValueError("%s %s: human must be true, yes, 1, false, no, 0 or empty" % (path, where))
+
+
+def _csv_seconds(value, path, where):
+    try:
+        unc = float(value.strip())
+    except ValueError:
+        unc = -1.0
+    if not math.isfinite(unc) or unc < 0:
+        raise ValueError("%s %s: uncertainty_seconds must be a number >= 0" % (path, where))
+    return unc
+
+
+def _generic_records(path, field_map):
+    """(sources, record iterator, cells) for a generic log; cells is True for CSV/TSV (all strings)."""
+    for field in field_map:
+        if field not in _GENERIC_KEYS:
+            raise ValueError("--map: %r is not a field patient-zero reads" % short(field))
+    sources = _sources(field_map)
+    fmt = generic_format(path)
+    if fmt == "jsonl":
+        return sources, _json_records(path, sources), False
+    return sources, _csv_records(path, sources, field_map, "\t" if fmt == "tsv" else ","), True
+
+
+def generic_human_labels(path, field_map=None):
+    """Labels of the human speakers in a generic log, read the way ``load_generic`` reads them.
+
+    For masking human handles in snippets (tools/peek.py). Never written out.
+    """
+    field_map = dict(field_map or {})
+    _sources_, records, cells = _generic_records(path, field_map)
+    humans = set()
+    with contextlib.closing(records):
+        for where, _number, obj in records:
+            human, label = obj["human"], obj["agent"]
+            if cells:
+                human = human is not _MISSING and _csv_human(human, path, where)
+            if human is True and isinstance(label, str) and label.strip():
+                humans.add(label.strip())
+    return humans
+
+
+def load_generic(path, field_map=None):
+    """Load a JSON Lines, CSV or TSV log with agent, time, place, text. Returns (rows, stats).
+
+    ``field_map`` maps field names to the log's own columns (see ``parse_map``).
+    """
+    field_map = dict(field_map or {})
+    sources, records, cells = _generic_records(path, field_map)
     stats = Counter()
     per_group = Counter()
     agents = set()
     rows = []
     seen_ids = set()
-    for number, obj in _read_json_lines(path, _GENERIC_KEYS):
-        missing = [k for k in _GENERIC_REQUIRED if k not in obj]
-        if missing:
-            raise ValueError("%s line %d: missing field(s) %s" % (path, number, ", ".join(missing)))
-        try:
-            when = parse_time(obj["time"])
-        except ValueError as exc:
-            raise ValueError("%s line %d: bad time (%s)" % (path, number, exc)) from None
-        text = obj["text"]
-        if not isinstance(text, str):
-            raise ValueError("%s line %d: text must be a string" % (path, number))
-        if obj["place"] is None or isinstance(obj["place"], (dict, list)):
-            raise ValueError("%s line %d: place must be a string" % (path, number))
-        row_id = str(obj["id"]) if obj.get("id") is not None else "line-%d" % number
-        if row_id in seen_ids:
-            raise ValueError("%s line %d: duplicate id" % (path, number))
-        seen_ids.add(row_id)
+    found = set()  # mapped optional fields seen on at least one line
+    with contextlib.closing(records):  # closes the file at once, even when a line is bad
+        for where, number, obj in records:
+            missing = [k for k in _GENERIC_REQUIRED if obj[k] is _MISSING]
+            if missing:
+                mapped = [k for k in missing if k in field_map]
+                if mapped:
+                    raise ValueError(_no_column(path, " " + where, mapped[0], sources[mapped[0]], field_map))
+                raise ValueError("%s %s: missing field(s) %s; if the log calls a field something else, name its "
+                                 "column with --map, for example --map %s=COLUMN"
+                                 % (path, where, ", ".join(missing), missing[0]))
+            found.update(f for f in field_map if obj[f] is not _MISSING)
+            try:
+                when = parse_time(obj["time"])
+            except ValueError as exc:
+                raise ValueError("%s %s: bad time (%s)" % (path, where, exc)) from None
+            text = obj["text"]
+            if not isinstance(text, str):
+                raise ValueError("%s %s: text must be a string" % (path, where))
+            if obj["place"] is None or isinstance(obj["place"], (dict, list)):
+                raise ValueError("%s %s: place must be a string" % (path, where))
+            if isinstance(obj["agent"], (dict, list)):
+                raise ValueError("%s %s: agent must be a string or a number, not a JSON object or list "
+                                 "(with --map, point at a field inside it, such as author.name)" % (path, where))
+            row_id = (str(obj["id"]) if obj["id"] is not _MISSING and obj["id"] is not None
+                      else "line-%d" % number)
+            if row_id in seen_ids:
+                raise ValueError("%s %s: duplicate id" % (path, where))
+            seen_ids.add(row_id)
 
-        label = obj["agent"]
-        label = str(label).strip() if label is not None else ""
-        if label and is_ip_shaped(label):
-            stats["ip_shaped_labels_blanked"] += 1
-            label = ""
-        if not label:
-            agent, role = None, ROLE_BLANK
-            stats["blank_rows"] += 1
-        elif obj.get("human") is True:
-            agent, role = None, ROLE_HUMAN
-            stats["human_rows"] += 1
-        else:
-            agent, role = label, ROLE_AGENT
-            agents.add(label)
+            label = obj["agent"]
+            label = str(label).strip() if label is not None else ""
+            if label and is_ip_shaped(label):
+                stats["ip_shaped_labels_blanked"] += 1
+                label = ""
+            human = obj["human"]
+            if cells:
+                human = human is not _MISSING and _csv_human(human, path, where)
+            if not label:
+                agent, role = None, ROLE_BLANK
+                stats["blank_rows"] += 1
+            elif human is True:
+                agent, role = None, ROLE_HUMAN
+                stats["human_rows"] += 1
+            else:
+                agent, role = label, ROLE_AGENT
+                agents.add(label)
 
-        text, n_ip = scrub_ips(text)
-        stats["ip_masked_in_text"] += n_ip
-        place, n_ip = scrub_ips(str(obj["place"]))
-        stats["ip_masked_in_place"] += n_ip
-        unc = obj.get("uncertainty_seconds", 0)
-        if isinstance(unc, bool) or not isinstance(unc, (int, float)) or unc < 0:
-            raise ValueError("%s line %d: uncertainty_seconds must be a number >= 0" % (path, number))
-        group = str(obj["group"]) if obj.get("group") is not None else None
-        per_group[group] += 1
-        rows.append(Row(
-            row_id=row_id,
-            agent=agent,
-            role=role,
-            time=when,
-            uncertainty=float(unc),
-            time_grade=str(obj["time_grade"]) if obj.get("time_grade") is not None else None,
-            place=place,
-            family=str(obj["family"]) if obj.get("family") is not None else None,
-            group=group,
-            text=text,
-        ))
+            text, n_ip = scrub_ips(text)
+            stats["ip_masked_in_text"] += n_ip
+            place, n_ip = scrub_ips(str(obj["place"]))
+            stats["ip_masked_in_place"] += n_ip
+            unc = obj["uncertainty_seconds"]
+            if unc is _MISSING:
+                unc = 0
+            elif cells:
+                unc = _csv_seconds(unc, path, where)
+            if isinstance(unc, bool) or not isinstance(unc, (int, float)) or unc < 0:
+                raise ValueError("%s %s: uncertainty_seconds must be a number >= 0" % (path, where))
+            opt = {k: (str(obj[k]) if obj[k] is not _MISSING and obj[k] is not None else None)
+                   for k in ("group", "family", "time_grade")}
+            per_group[opt["group"]] += 1
+            rows.append(Row(
+                row_id=row_id,
+                agent=agent,
+                role=role,
+                time=when,
+                uncertainty=float(unc),
+                time_grade=opt["time_grade"],
+                place=place,
+                family=opt["family"],
+                group=opt["group"],
+                text=text,
+            ))
+    if rows and not cells:  # a CSV header was checked up front; JSON keys can differ per line
+        for field in _GENERIC_FIELDS:
+            if field in field_map and field not in found:
+                raise ValueError("%s: no line has column '%s' (--map %s=%s)."
+                                 % (path, short(field_map[field]), field, short(field_map[field])))
 
     out = {
         "adapter": "generic",
@@ -437,23 +682,54 @@ def load_generic(path):
 ADAPTERS = {"wiki": load_wiki, "generic": load_generic}
 
 
-def load(adapter, path):
-    """Load path with the named adapter ('wiki' or 'generic'). Returns (rows, stats)."""
+def load(adapter, path, field_map=None):
+    """Load path with the named adapter ('wiki' or 'generic'). Returns (rows, stats).
+
+    ``field_map`` (generic only) maps field names to the log's own columns.
+    """
     try:
         fn = ADAPTERS[adapter]
     except KeyError:
         raise ValueError("unknown adapter %r (choose from %s)" % (adapter, ", ".join(sorted(ADAPTERS))))
+    if field_map:
+        if adapter != "generic":
+            raise ValueError("--map works only with --adapter generic; the %s adapter reads fixed "
+                             "file and field names" % adapter)
+        return fn(path, field_map)
     return fn(path)
+
+
+MAP_HELP = ("generic only: the log's own column for each field, for example "
+            "agent=user,time=ts,place=channel,text=body; dotted paths reach into nested JSON "
+            "(agent=author.name); fields left out are read under their own names")
+
+
+def input_note(adapter, path, field_map=None):
+    """Extra facts.json "input" keys for a non-default generic run: {format?, map?} ({} otherwise).
+
+    A JSON Lines run with no map adds nothing, so its facts (and core hash)
+    are the same as before ``--map`` existed.
+    """
+    note = {}
+    if adapter == "generic":
+        fmt = generic_format(path)
+        if fmt != "jsonl":
+            note["format"] = fmt
+        if field_map:
+            note["map"] = {f: short(field_map[f]) for f in _GENERIC_FIELDS if f in field_map}
+    return note
 
 
 def main(argv=None, out=None):
     out = out or sys.stdout
     ap = argparse.ArgumentParser(description="Load a log and print row counts (no text, no names).")
     ap.add_argument("--adapter", choices=sorted(ADAPTERS), required=True)
-    ap.add_argument("--input", required=True, help="export folder (wiki) or JSON Lines file (generic)")
+    ap.add_argument("--input", required=True,
+                    help="export folder (wiki) or a JSON Lines, CSV or TSV file (generic)")
+    ap.add_argument("--map", help=MAP_HELP)
     args = ap.parse_args(argv)
     try:
-        _rows, stats = load(args.adapter, args.input)
+        _rows, stats = load(args.adapter, args.input, parse_map(args.map))
     except (OSError, ValueError) as exc:
         print("load: ERROR: %s" % exc, file=out)
         return 2

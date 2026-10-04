@@ -60,7 +60,7 @@ import time
 from collections import Counter, defaultdict
 
 from patient_zero import nullmodel as N
-from patient_zero.load import ADAPTERS, load
+from patient_zero.load import ADAPTERS, MAP_HELP, load, parse_map
 from patient_zero.safe import token_id
 from patient_zero.tokens import MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
 
@@ -256,7 +256,9 @@ def main(argv=None, out=None):
     out = out or sys.stdout
     ap = argparse.ArgumentParser(description="Robustness checks for adoption links (counts only).")
     ap.add_argument("--adapter", choices=sorted(ADAPTERS), required=True)
-    ap.add_argument("--input", required=True, help="export folder (wiki) or JSON Lines file (generic)")
+    ap.add_argument("--input", required=True,
+                    help="export folder (wiki) or a JSON Lines, CSV or TSV file (generic)")
+    ap.add_argument("--map", help=MAP_HELP)
     ap.add_argument("--out", help="write the counts as JSON here (outside the repo, or in its out/ folder)")
     ap.add_argument("--shuffles", type=int, default=N.DEFAULT_SHUFFLES)
     ap.add_argument("--variant-shuffles", type=int, default=None,
@@ -272,7 +274,7 @@ def main(argv=None, out=None):
             check_out_dir(os.path.dirname(os.path.abspath(args.out)))
         if args.shuffles < 1:
             raise ValueError("--shuffles must be 1 or more")
-        rows, _stats = load(args.adapter, args.input)
+        rows, _stats = load(args.adapter, args.input, parse_map(args.map))
     except (OSError, ValueError) as exc:
         print("checks: ERROR: %s" % exc, file=out)
         return 2

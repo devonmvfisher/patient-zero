@@ -7,6 +7,11 @@ One command does the whole run::
 
     python cli.py --adapter wiki --input PATH/TO/collusion --out PATH/TO/out
     python cli.py --adapter generic --input examples/fake_log.ndjson --out out/example
+    python cli.py --adapter generic --input examples/fake_log.csv --out out/csv         --map agent=user,time=ts,place=channel,text=body
+
+``--map`` (generic adapter only) names the log's own column for each field;
+see ``patient_zero.load.parse_map``. A CSV or TSV input, or a map, is
+recorded in the ``input`` section of facts.json.
 
 ``--out`` must be outside the repo, or inside the repo's git-ignored ``out/``
 folder. Four files are written there:
@@ -75,7 +80,7 @@ from patient_zero import nullmodel as N
 from patient_zero import report as R
 from patient_zero import score as S
 from patient_zero.cascade import STATUSES, build_trees
-from patient_zero.load import ADAPTERS, iso_utc, load
+from patient_zero.load import ADAPTERS, MAP_HELP, input_note, iso_utc, load, parse_map
 from patient_zero.safe import NO_FAMILY, SHORT_MAX, short, token_id  # noqa: F401 (re-exported)
 from patient_zero.score import NARROW_RISKY, branch_sizes  # noqa: F401 (re-exported)
 from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
@@ -198,11 +203,15 @@ def _write_atomic(path, text):
 
 
 def run(adapter, input_path, min_agents=MIN_AGENTS, max_phrase_share=MAX_PHRASE_SHARE,
-        given_texts=(), shuffles=N.DEFAULT_SHUFFLES, seed=N.DEFAULT_SEED, scope=N.SCOPE_DAY):
-    """Load, find tokens, build spread trees, run the shuffle. Returns a Result (in memory)."""
+        given_texts=(), shuffles=N.DEFAULT_SHUFFLES, seed=N.DEFAULT_SEED, scope=N.SCOPE_DAY,
+        field_map=None):
+    """Load, find tokens, build spread trees, run the shuffle. Returns a Result (in memory).
+
+    ``field_map`` (generic adapter only) maps field names to the log's own columns.
+    """
     seconds = {}
     t0 = time.perf_counter()
-    rows, load_stats = load(adapter, input_path)
+    rows, load_stats = load(adapter, input_path, field_map)
     seconds["load"] = time.perf_counter() - t0
     t0 = time.perf_counter()
     tokens, token_stats = find_tokens(rows, min_agents=min_agents, given_texts=given_texts,
@@ -423,7 +432,7 @@ def build_facts(result, records, files, params, trees_meta, code, started, total
         "tool": "patient-zero",
         "facts_version": FACTS_VERSION,
         "stage": "J7 full run: load, tokens, spread trees, shuffle baseline, scores, report",
-        "input": {"adapter": params["adapter"], "files": files},
+        "input": dict({"adapter": params["adapter"], "files": files}, **params.get("input_note", {})),
         "params": {
             "min_agents": params["min_agents"],
             "max_phrase_share": params["max_phrase_share"],
@@ -545,9 +554,11 @@ def main(argv=None, out=None):
         description="Run patient-zero end to end and write facts.json, trees.jsonl, top_trees.json and "
                     "report.html (counts and summary fields only; no row text).")
     ap.add_argument("--adapter", choices=sorted(ADAPTERS), required=True,
-                    help="wiki: the collusion.wiki export folder; generic: one JSON Lines log "
-                         "(see examples/fake_log.ndjson)")
-    ap.add_argument("--input", required=True, help="export folder (wiki) or JSON Lines file (generic)")
+                    help="wiki: the collusion.wiki export folder; generic: one JSON Lines, CSV or TSV "
+                         "log (see examples/fake_log.ndjson and examples/fake_log.csv)")
+    ap.add_argument("--input", required=True,
+                    help="export folder (wiki) or a JSON Lines, CSV or TSV file (generic)")
+    ap.add_argument("--map", help=MAP_HELP)
     ap.add_argument("--out", required=True, help="output folder: outside the repo, or the repo's git-ignored out/")
     ap.add_argument("--min-agents", type=int, default=MIN_AGENTS,
                     help="keep tokens used by at least this many agents (default %d)" % MIN_AGENTS)
@@ -569,15 +580,17 @@ def main(argv=None, out=None):
     started_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         check_out_dir(args.out)
+        field_map = parse_map(args.map)
         given = []
         for path in args.given:
             with open(path, "r", encoding="utf-8") as fh:
                 given.append(fh.read())
         result = run(args.adapter, args.input, min_agents=args.min_agents,
                      max_phrase_share=args.max_phrase_share, given_texts=given,
-                     shuffles=args.shuffles, seed=args.seed, scope=args.shuffle_scope)
+                     shuffles=args.shuffles, seed=args.seed, scope=args.shuffle_scope, field_map=field_map)
         params = {"adapter": args.adapter, "input": args.input, "min_agents": args.min_agents,
-                  "max_phrase_share": args.max_phrase_share, "given_texts": len(given), "lead": args.lead}
+                  "max_phrase_share": args.max_phrase_share, "given_texts": len(given), "lead": args.lead,
+                  "input_note": input_note(args.adapter, args.input, field_map)}
         facts = write_outputs(args.out, result, params, started_clock, started_utc)
     except (OSError, ValueError) as exc:
         print("patient-zero: ERROR: %s" % exc, file=out)

@@ -883,6 +883,10 @@ def render_report(facts, records, detail, lead=None):
            '<title>patient-zero report</title><style>%s</style></head><body><main>' % CSS]
 
     files = ", ".join("%s (sha256 %s...)" % (f["name"], f["sha256"][:12]) for f in facts["input"]["files"])
+    if facts["input"].get("format"):
+        files += ", read as %s" % facts["input"]["format"]
+    if facts["input"].get("map"):
+        files += ", --map %s" % ",".join("%s=%s" % kv for kv in facts["input"]["map"].items())
     code = facts.get("code") or {}
     out.append("<header><h1>patient-zero report</h1>")
     out.append('<p class="meta">Built by patient_zero/report.py from facts.json, trees.jsonl and top_trees.json. '

@@ -222,7 +222,7 @@ def page_check(link, rows, a_line, saves):
     return on_page, changed
 
 
-def human_handles(adapter, path):
+def human_handles(adapter, path, field_map=None):
     """Human handles the loader hides, so snippets can mask them too."""
     humans = set()
     if adapter == "wiki":
@@ -232,10 +232,8 @@ def human_handles(adapter, path):
                 if lab.get("is_human_handle") is True and isinstance(lab.get("label"), str):
                     if lab["label"].strip():
                         humans.add(lab["label"].strip())
-    else:
-        for _n, obj in L._read_json_lines(path, L._GENERIC_KEYS):
-            if obj.get("human") is True and isinstance(obj.get("agent"), str) and obj["agent"].strip():
-                humans.add(obj["agent"].strip())
+    else:  # read with the same columns as the loader (--map, CSV), so every hidden handle is masked
+        humans = L.generic_human_labels(path, field_map)
     return sorted(humans, key=lambda h: (-len(h), h))  # longest first
 
 
@@ -412,7 +410,7 @@ def _inside_repo(path):
 
 
 def peek(adapter, input_path, out_path, facts_path=None, n=PEEK_N, seed=PEEK_SEED,
-         min_agents=MIN_AGENTS, max_phrase_share=MAX_PHRASE_SHARE, population=False):
+         min_agents=MIN_AGENTS, max_phrase_share=MAX_PHRASE_SHARE, population=False, field_map=None):
     """Run load, tokens and cascade, draw the sample, write ``out_path`` and its .json twin.
 
     ``population`` (wiki only) also runs the page check over every named link
@@ -422,7 +420,7 @@ def peek(adapter, input_path, out_path, facts_path=None, n=PEEK_N, seed=PEEK_SEE
     if facts_path:
         with open(facts_path, "r", encoding="utf-8") as fh:
             facts = json.load(fh)
-    rows, _load_stats = L.load(adapter, input_path)
+    rows, _load_stats = L.load(adapter, input_path, field_map)
     tokens, token_stats = find_tokens(rows, min_agents=min_agents, max_phrase_share=max_phrase_share)
     trees, tree_stats = build_trees(rows, tokens)
     if facts is not None:  # the sample must come from the run facts.json describes
@@ -438,7 +436,7 @@ def peek(adapter, input_path, out_path, facts_path=None, n=PEEK_N, seed=PEEK_SEE
         page_counts = population_check(rows, tokens, trees, all_saves)
         bodies = lambda _ids: all_saves  # noqa: E731 (one read serves both)
     items, population_size = sample(rows, tokens, trees, n=n, seed=seed,
-                                    humans=human_handles(adapter, input_path), bodies=bodies)
+                                    humans=human_handles(adapter, input_path, field_map), bodies=bodies)
     result = {
         "tool": "patient-zero peek",
         "seed": seed,
@@ -612,7 +610,8 @@ def main(argv=None, out=None):
     ap = argparse.ArgumentParser(description="Print random adoption links as short escaped snippets, "
                                              "or record a reader's marks (--record).")
     ap.add_argument("--adapter", choices=sorted(L.ADAPTERS))
-    ap.add_argument("--input", help="export folder (wiki) or JSON Lines file (generic)")
+    ap.add_argument("--input", help="export folder (wiki) or a JSON Lines, CSV or TSV file (generic)")
+    ap.add_argument("--map", help=L.MAP_HELP)
     ap.add_argument("--out", help="text file for the reader, outside the repo (a .json twin is written too)")
     ap.add_argument("--facts", help="facts.json of the same run (checked; written by --record)")
     ap.add_argument("--n", type=int, default=PEEK_N)
@@ -643,7 +642,7 @@ def main(argv=None, out=None):
             raise ValueError("--out must be outside the repo")
         result = peek(args.adapter, args.input, args.out, facts_path=args.facts, n=args.n, seed=args.seed,
                       min_agents=args.min_agents, max_phrase_share=args.max_phrase_share,
-                      population=args.population)
+                      population=args.population, field_map=L.parse_map(args.map))
     except (OSError, ValueError, KeyError) as exc:
         print("peek: ERROR: %s" % exc, file=out)
         return 2
