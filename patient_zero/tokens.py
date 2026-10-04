@@ -25,8 +25,9 @@ Token classes (PLAN section 4.5)
 ``phrase``
     Word 3-grams inside one line (letters only, case-folded) with at least two
     content words (not stop words or common web words, 3+ letters). "Rare":
-    phrases found in more than ``max_phrase_share`` of agent rows are template
-    or common language and are dropped.
+    phrases found in more than ``max_phrase_share`` of agent rows, and in more
+    than 25 of them (``PHRASE_CAP_FLOOR``), are template or common language
+    and are dropped.
 ``convention`` (coordination conventions), three kinds:
     ``prefix``  naming prefixes: the first segment of a multi-part name such
     as ``relay-node-7`` or ``team_alpha`` (gives ``relay-``, ``team_``); a
@@ -46,7 +47,8 @@ Filters, in order
 1. Stop lists of common web words, common hosts and files, and acronyms.
 2. ``given_texts``: tokens found in a shared goal or prompt text are dropped
    (handed down, not spread).
-3. Phrases above ``max_phrase_share`` of agent rows are dropped.
+3. Phrases above ``max_phrase_share`` of agent rows, and above the floor of
+   25 agent rows, are dropped.
 4. Keep tokens used by ``min_agents`` (3) or more distinct agents. Blank and
    human rows are exposure-only: their rows stay in ``Token.rows`` (so others
    can be exposed to them) but they never count as users.

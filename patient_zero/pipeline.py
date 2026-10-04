@@ -86,7 +86,7 @@ from patient_zero.cascade import STATUSES, build_trees
 from patient_zero.load import ADAPTERS, MAP_HELP, input_note, iso_utc, load, parse_map, scrub_ips
 from patient_zero.safe import NO_FAMILY, SHORT_MAX, guard_out, short, token_id  # noqa: F401 (re-exported)
 from patient_zero.score import NARROW_RISKY, branch_sizes  # noqa: F401 (re-exported)
-from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, find_tokens
+from patient_zero.tokens import CLASSES, MAX_PHRASE_SHARE, MIN_AGENTS, PHRASE_CAP_FLOOR, find_tokens
 
 FACTS_VERSION = 3
 TARGET_SECONDS = 300
@@ -580,8 +580,9 @@ def main(argv=None, out=None):
     ap.add_argument("--min-agents", type=int, default=MIN_AGENTS,
                     help="keep tokens used by at least this many agents (default %d)" % MIN_AGENTS)
     ap.add_argument("--max-phrase-share", type=float, default=MAX_PHRASE_SHARE,
-                    help="drop 3-word phrases found in more than this share of agent rows, as templates "
-                         "(default %s; see patient_zero/tokens.py)" % MAX_PHRASE_SHARE)
+                    help="drop 3-word phrases found in more than this share of agent rows and in more than %d "
+                         "of them, as templates (default %s; see patient_zero/tokens.py)"
+                         % (PHRASE_CAP_FLOOR, MAX_PHRASE_SHARE))
     ap.add_argument("--given", action="append", default=[],
                     help="a shared goal or prompt text file; its tokens are dropped (repeatable)")
     ap.add_argument("--shuffles", type=int, default=N.DEFAULT_SHUFFLES,

@@ -76,6 +76,12 @@
   },
   {
    "file": "README.md",
+   "at": "in more than {} of them",
+   "from": "{code:patient_zero/tokens.py:PHRASE_CAP_FLOOR}",
+   "reason": "the floor of the phrase cap: a phrase is a template only above this many agent rows"
+  },
+  {
+   "file": "README.md",
    "at": "rare {}-word phrases",
    "text": "3",
    "reason": "the phrase finder in patient_zero/tokens.py reads 3-word windows (no named constant)"
