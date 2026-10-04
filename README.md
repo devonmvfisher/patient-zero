@@ -84,13 +84,13 @@ Writers never overwrite their own inputs. `cli.py --out`, `checks --out`, `tools
 
 *`docs/lead.svg`: one tree from a run on the German wiki export, shown to say what a traced tree looks like. It is not evidence that spread beat chance: it was picked as the largest of the 42 trees that beat every label shuffle, and chance alone allows up to 76 such trees. It holds summary data only: no agent names and no token text. The figure itself says how the tree was picked and how the whole run did against both bars.*
 
-To change the lead tree or redraw that figure without re-running:
+To change the report's lead tree and draw it, without re-running (`TOKEN_ID` is a `token_id` in `top_trees.json`; the run prints its lead tree's id on its `lead tree:` line):
 
 ```
-python -m patient_zero.report --out out/wiki --lead TOKEN_ID --svg docs/lead.svg
+python -m patient_zero.report --out out/wiki --lead TOKEN_ID --svg out/wiki/lead.svg
 ```
 
-The figure's order-null line comes from `out/wiki/checks.json` (see Robustness checks below). It is used only when its row, token and link counts match `facts.json`; otherwise the figure shows the label shuffle alone. Leave out `--lead` to keep the default lead tree.
+That figure goes under `out/`, not over the published one, and it says "Picked by hand (--lead)". The published `docs/lead.svg` is the default lead tree, drawn with no `--lead` and after the checks run. Its order-null line comes from `out/wiki/checks.json` (see Robustness checks below). It is used only when its row, token and link counts match `facts.json`; otherwise the figure shows the label shuffle alone. To redraw the published figure, run the checks command first, then `python -m patient_zero.report --out out/wiki --svg docs/lead.svg`. `tests/test_readme.py` checks this README against that file, so a tree drawn over it by hand, or before the checks run, makes `python -m unittest` fail until the file is restored.
 
 ## Your own log (generic adapter)
 
@@ -192,7 +192,7 @@ The planted known-answer tests are the evidence that the tool can see spread: `t
 
 The German wiki text was written by AI agents for other agents, and some of it is hostile. Only deterministic code reads it. Nothing here opens a URL or runs a command found in the data. Strings taken from the data are escaped and cut to 80 characters before they reach any output.
 
-Maintainer tool: `tools/leakcheck.py` runs before every commit. It fails on any `.gz`, `.jsonl` or `.zip` file in the repo, on IP-shaped strings and on the half-IP field name. It also fails on any 12-word run copied from the data. It needs an index built from the data (`--build-index --data DIR`), and refuses to write that index inside the repo or inside the data folder. In a fresh clone without that index it fails closed with exit code 2. It also scans the git-ignored `out/` folder, so it fails on the `.jsonl` files that a demo run leaves there. Keep run outputs outside the repo when you run it.
+Maintainer tool: `tools/leakcheck.py` runs before every commit. It fails on any `.gz`, `.jsonl` or `.zip` file in the repo, on IP-shaped strings and on the half-IP field name. It also fails on any 12-word run copied from the data. It needs an index built from the data (`--build-index --data DIR`), and refuses to write that index inside the repo or inside the data folder. In a fresh clone without that index it fails closed with exit code 2. It scans git-ignored folders too. So it fails on the `.jsonl` files that a demo run leaves in `out/`, and on the `__pycache__` files that Python writes when the tests run (the code builds the field name and the tests' made-up addresses from parts, and Python compiles the parts into whole strings). Keep run outputs outside the repo and delete the `__pycache__` folders when you run it.
 
 Maintainer tool: `tools/claimcheck.py` checks that every number in this README, in the text of `docs/*.svg` and in any `WRITEUP*` file equals a value in a run's `facts.json`, `checks.json`, `calibration.json` or lead tree, or is covered by an entry in `claims-allow.json` that gives its reason. It reads those documents and never changes them. It also reports how many numbers would still pass if their last digit moved by one. Run it after every merge that changes a number: `python tools/claimcheck.py --run wiki=PATH/TO/out`.
 

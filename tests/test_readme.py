@@ -1,12 +1,14 @@
 """Guards for the README, the front door a judge or a stranger reads first.
 
-Standard library unittest only; no data needed. Three checks:
+Standard library unittest only; no data needed. Four checks:
 
 1. every repo path the README quotes exists, so no pointer goes nowhere;
 2. every "README.md, section ..." pointer in the code names a real heading;
 3. the German wiki numbers in the README's "At a glance" block agree with the
    committed figure, docs/lead.svg, so a redrawn figure cannot leave stale
-   numbers in the README (or the other way round).
+   numbers in the README (or the other way round);
+4. no command the README gives to copy draws a hand-picked tree over that
+   figure, so following the README cannot break check 3.
 """
 
 import glob
@@ -101,6 +103,22 @@ class Readme(unittest.TestCase):
         self.assertIn("can-it-see.svg", whole)
         self.assertIn("below chance", whole)
         self.assertIn("below chance", bullet)
+
+    def test_no_fenced_command_draws_a_hand_picked_tree_over_a_published_figure(self):
+        """A copied command must leave docs/lead.svg as the check above needs it.
+
+        ``report --lead`` writes "Picked by hand (--lead)." into the figure. The README once gave
+        ``--lead TOKEN_ID --svg docs/lead.svg`` as a command to copy: run as written, it replaced the
+        published figure, and the check above then failed for the reader. A fenced command that names
+        a tree by hand must draw under the git-ignored out/ folder.
+        """
+        blocks = re.findall(r"```\n(.*?)```", self.md, flags=re.S)
+        self.assertTrue(blocks)
+        for line in "\n".join(blocks).splitlines():
+            words = line.split()
+            if "--lead" in words and "--svg" in words[:-1]:
+                target = words[words.index("--svg") + 1]
+                self.assertTrue(target.startswith("out/"), "%s would be drawn over by: %s" % (target, line))
 
 
 if __name__ == "__main__":
