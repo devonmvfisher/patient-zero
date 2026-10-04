@@ -250,6 +250,11 @@ class Controls(unittest.TestCase):
         self.assertGreater(entry["cross_page"]["none"]["observed"], 0)
         self.assertIn("powered", entry["cross_page"]["none"])
         self.assertEqual(got["horizon_calibrated"], {n: None for n in NAMES})
+        # all links of a control: cross + same page under the tracer's own rule, shuffle for shuffle
+        self.assertEqual(entry["all_links"]["observed"],
+                         entry["cross_page"]["none"]["observed"] + entry["same_page"]["none"]["observed"])
+        self.assertAlmostEqual(entry["all_links"]["mean"],
+                               entry["cross_page"]["none"]["mean"] + entry["same_page"]["none"]["mean"], places=1)
 
     def test_bad_controls_are_refused(self):
         rows, tokens = chat_rows()

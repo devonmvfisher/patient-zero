@@ -20,7 +20,8 @@ accent dot. Rows:
     - page-instruction decoy: drawn as "not run yet" until calibration.json
       holds ``planted.page_instruction``.
 * Did it see? (the real wiki)
-    - all links (from checks.json);
+    - all links (from checks.json), and under it the same no-spread control on
+      all links (``controls.random_400.all_links``);
     - cross-page links (from calibration.json);
     - the no-spread control for that row: random rows scored the same way
       (``controls.random_400.cross_page``), drawn as "not run yet" until
@@ -99,6 +100,8 @@ ROWS = (
     Row("page_instruction", "can", "calibration.json", ("planted", "page_instruction", "all_links"),
         "decoy: the page tells every writer", False),
     Row("real_all", "did", "checks.json", ("order_null", "links_named"), "real wiki: all pairs", True),
+    Row("random_all", "did", "calibration.json", ("controls", "random_400", "all_links"),
+        "control: random rows, all pairs", False),
     Row("real_cross", "did", "calibration.json", ("real", "cross_page"), "real wiki: cross-page pairs", True),
     Row("random_cross", "did", "calibration.json", ("controls", "random_400", "cross_page"),
         "control: random rows, cross-page", False),

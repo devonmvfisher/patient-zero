@@ -98,9 +98,9 @@ DATA_PLANNED = {
     "hashes_match": "every hash printed is the SHA-256 prefix of the source file named beside it, and every "
                     "source's hash is printed",
     "phone_check": "smallest font px x %d / canvas width >= %g" % (PHONE_WIDTH, PHONE_MIN_PX),
-    "rows_complete": "the six rows are there in order (carry, same-page, decoy, real all, real cross-page, random-row "
-                     "control); only the decoy and the control may be pending or left out, and only while their "
-                     "source has no numbers",
+    "rows_complete": "the seven rows are there in order (carry, same-page, decoy, real all, its random-row control, "
+                     "real cross-page, its random-row control); only the decoy and the two controls may be pending "
+                     "or left out, and only while their source has no numbers",
 }
 # Rows of docs/can-it-see.svg, in order: (key, source, JSON path, may be missing).
 DATA_ROWS = (
@@ -108,6 +108,7 @@ DATA_ROWS = (
     ("same_page", "calibration.json", "planted.contagion.all_links", False),
     ("page_instruction", "calibration.json", "planted.page_instruction.all_links", True),
     ("real_all", "checks.json", "order_null.links_named", False),
+    ("random_all", "calibration.json", "controls.random_400.all_links", True),
     ("real_cross", "calibration.json", "real.cross_page", False),
     ("random_cross", "calibration.json", "controls.random_400.cross_page", True),
 )

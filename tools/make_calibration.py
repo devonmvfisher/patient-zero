@@ -26,8 +26,8 @@ same-page split must add up to the calibrate run's real all-links count and mean
 run whose gates failed, and a planted kind whose contact flag it does not know (fail closed).
 
 The random-row control at 400 tokens (crossgrid ``random_c2``, pre-registered in PZ-5) is copied under
-``controls``. The figure does not draw it yet; it is the cell that shows whether the cross-page bar reads
-structureless tokens at 1.0.
+``controls``: its cross-page cell, and its all-links cell when the grid wrote one. The figure draws each under
+the real row it controls; they show whether the bar reads tokens with no structure at 1.0.
 """
 
 import argparse
@@ -165,6 +165,8 @@ def build(cal, grid, checks=None, sources=None):
             "tokens": c2.get("tokens"),
             "cross_page": cell((c2.get("cross_page") or {}).get(HORIZON), "crossgrid random_c2 cross_page.none"),
         }
+        if "all_links" in c2:  # the same tokens scored on every link (cross + same page), like the real all-links row
+            doc["controls"]["random_400"]["all_links"] = cell(c2["all_links"], "crossgrid random_c2 all_links")
     return doc
 
 

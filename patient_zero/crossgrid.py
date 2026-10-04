@@ -467,6 +467,10 @@ def grid(rows, tokens, controls=(), shuffles=N.DEFAULT_SHUFFLES, seed=N.DEFAULT_
                 sm["powered"] = sm["z"] is not None and sm["z"] >= 3
             entry["cross_page"][name] = sm
             entry["same_page"][name] = summary([series(cls, "same", h, s) for s in sims], series(cls, "same", h))
+        if none_h is not None:  # every link of the control under the tracer's own rule, shuffle for shuffle
+            entry["all_links"] = summary([series(cls, "cross", none_h, s) + series(cls, "same", none_h, s)
+                                          for s in sims],
+                                         series(cls, "cross", none_h) + series(cls, "same", none_h))
         out["controls"][cname] = entry
     has_cal = any(role == ROLE_CALIBRATION for _c, role, _n in roles.values())
     out["horizon_calibrated"] = calibrated if has_cal else {name: None for name in names}

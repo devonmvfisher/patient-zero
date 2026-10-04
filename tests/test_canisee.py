@@ -102,8 +102,10 @@ class Rows(Base):
     def test_positions_and_words(self):
         rows = {r["row"].key: r for r in C.build_rows(calibration(), checks())}
         self.assertEqual([r.key for r in C.ROWS],
-                         ["carry", "same_page", "page_instruction", "real_all", "real_cross", "random_cross"])
+                         ["carry", "same_page", "page_instruction", "real_all", "random_all", "real_cross",
+                          "random_cross"])
         self.assertEqual(rows["random_cross"]["status"], "pending")
+        self.assertEqual(rows["random_all"]["status"], "pending")
         self.assertEqual(rows["carry"]["verdict"], "above the band: seen")
         self.assertEqual(rows["same_page"]["verdict"], "inside the band: blind spot")
         self.assertEqual(rows["page_instruction"]["status"], "pending")
@@ -144,7 +146,7 @@ class Rows(Base):
                 C.build_rows(cal, checks())
         cal = calibration()
         del cal["real"]["same_page"]  # without both halves there is nothing to add up
-        self.assertEqual(len(C.build_rows(cal, checks())), 6)
+        self.assertEqual(len(C.build_rows(cal, checks())), 7)
 
     def test_refuses_missing_rows_and_wrong_schema(self):
         cal = calibration()
@@ -180,7 +182,7 @@ class Figure(Base):
         self.assertEqual(report["status"], "PASS")
         self.assertEqual(set(report["checks"]), set(F.DATA_PLANNED))
         self.assertEqual(report["checks"]["numbers_match_sources"]["rows_drawn"], 4)
-        self.assertEqual(report["checks"]["numbers_match_sources"]["rows_pending"], 2)
+        self.assertEqual(report["checks"]["numbers_match_sources"]["rows_pending"], 3)
         self.assertEqual(report["checks"]["same_null"]["null_id"], "order:agent_day:lag0:default:seed7:n100")
 
     def test_figcheck_passes_with_the_decoy_drawn(self):
@@ -205,7 +207,7 @@ class Figure(Base):
     def test_one_null_id_on_every_row_and_in_the_footer(self):
         self.write()
         rows = self.rows()
-        self.assertEqual(len(rows), 6)
+        self.assertEqual(len(rows), 7)
         self.assertEqual(set(g.get("data-null") for g in rows.values()), {"order:agent_day:lag0:default:seed7:n100"})
         tag = hashlib.sha256(b"order:agent_day:lag0:default:seed7:n100").hexdigest()[:12]
         self.assertIn("null id %s: seed 7, 100 shuffles" % tag, self.svg)
@@ -454,9 +456,10 @@ class CommittedFigure(unittest.TestCase):
         self.assertEqual(code, 0, text.splitlines()[-1])
 
 
-def with_control(control_cell, contact=False):
+def with_control(control_cell, contact=False, all_cell=None):
     doc = calibration(cell(50, 50.5, 45.0, 56.0))
-    doc["controls"] = {"random_400": {"contact": contact, "tokens": 400, "cross_page": control_cell}}
+    doc["controls"] = {"random_400": {"contact": contact, "tokens": 400, "cross_page": control_cell,
+                                      "all_links": all_cell or cell(60, 64.5, 61.0, 68.0)}}
     return doc
 
 
@@ -472,6 +475,13 @@ class ControlRow(Base):
         above = {r["row"].key: r for r in C.build_rows(with_control(cell(45, 35.0, 31.0, 39.0)), checks())}
         self.assertEqual(above["random_cross"]["verdict"], "above the band: biased high")
 
+    def test_all_links_control_words(self):
+        rows = {r["row"].key: r for r in C.build_rows(
+            with_control(cell(30, 35.0, 31.0, 39.0), all_cell=cell(64, 64.5, 61.0, 68.0)), checks())}
+        self.assertEqual(rows["random_all"]["verdict"], "inside the band: unbiased")
+        rows = {r["row"].key: r for r in C.build_rows(with_control(cell(30, 35.0, 31.0, 39.0)), checks())}
+        self.assertEqual(rows["random_all"]["verdict"], "below the band: biased low")
+
     def test_a_control_with_contact_is_refused(self):
         with self.assertRaises(C.CanISeeError):
             C.build_rows(with_control(cell(30, 35.0, 31.0, 39.0), contact=True), checks())
@@ -479,12 +489,13 @@ class ControlRow(Base):
     def test_figcheck_passes_with_every_row_drawn(self):
         self.write(cal=with_control(cell(30, 35.0, 31.0, 39.0)))
         rows = self.rows()
-        self.assertEqual([k for k in rows], ["carry", "same_page", "page_instruction", "real_all", "real_cross",
-                                             "random_cross"])
+        self.assertEqual([k for k in rows], ["carry", "same_page", "page_instruction", "real_all", "random_all",
+                                             "real_cross", "random_cross"])
+        self.assertEqual(rows["random_all"].get("data-status"), "drawn")
         self.assertEqual(rows["random_cross"].get("data-status"), "drawn")
         code, text, report = self.figcheck()
         self.assertEqual(code, 0, text)
-        self.assertEqual(report["checks"]["numbers_match_sources"]["rows_drawn"], 6)
+        self.assertEqual(report["checks"]["numbers_match_sources"]["rows_drawn"], 7)
         self.assertEqual(report["checks"]["numbers_match_sources"]["rows_pending"], 0)
         self.assertIn("biased low", self.svg)
 

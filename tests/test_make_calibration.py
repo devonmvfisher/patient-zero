@@ -58,7 +58,8 @@ def crossgrid_doc():
                      "rows": 1000, "tokens": 70,
                      "total": both(cell(80, 100.25, 90.0, 110.0), cell(435, 420.25, 410.0, 431.0)),
                      "controls": {"random_c2": dict(both(cell(30, 35.0, 31.0, 39.0), cell(5, 5.0, 3.0, 7.0)),
-                                                    tokens=400, role="calibration")}}}
+                                                    tokens=400, role="calibration",
+                                                    all_links=cell(35, 40.0, 36.0, 44.0))}}}
 
 
 def checks_doc():
@@ -89,15 +90,18 @@ class Build(unittest.TestCase):
                          doc["null"]["h0"]["observed"])
         self.assertEqual(doc["controls"]["random_400"]["tokens"], 400)
         self.assertEqual(doc["controls"]["random_400"]["cross_page"]["observed"], 30)
+        self.assertEqual(doc["controls"]["random_400"]["all_links"]["observed"], 35)
         for kind in doc["planted"].values():  # only the cell fields travel, never z or ratio
             self.assertNotIn("z", kind["all_links"])
 
     def test_canisee_draws_every_row_from_it(self):
         doc = M.build(calibrate_doc(), crossgrid_doc(), checks_doc())
         rows = C.build_rows(doc, checks_doc())
-        self.assertEqual([r["status"] for r in rows], ["drawn"] * 6)
+        self.assertEqual([r["status"] for r in rows], ["drawn"] * 7)
         self.assertEqual([r["row"].key for r in rows],
-                         ["carry", "same_page", "page_instruction", "real_all", "real_cross", "random_cross"])
+                         ["carry", "same_page", "page_instruction", "real_all", "random_all", "real_cross",
+                          "random_cross"])
+        self.assertEqual(rows[4]["verdict"], "below the band: biased low")
         self.assertEqual(rows[-1]["verdict"], "below the band: biased low")
         svg = C.draw(doc, checks_doc(), {"calibration.json": "0" * 64, "checks.json": "1" * 64})
         self.assertIn("<svg", svg)

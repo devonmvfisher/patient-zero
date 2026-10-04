@@ -379,14 +379,22 @@ class RealRun(ExampleBase):
         super().setUpClass()
         cls.real = _real_run_dir(cls.tmp)
         cls.real_facts = facts(cls.real)
+        # A run built here from PZ_DATA alone has no calibration.json, so the can-it-see figure cannot be
+        # traced; it is checked when PZ_RUN names a full run folder (cli + checks + make_calibration).
+        cls.has_calibration = os.path.exists(os.path.join(cls.real, "calibration.json"))
+        cls.only = ([] if cls.has_calibration else
+                    ["--only", "README.md", "--only", "docs/lead.svg", "--only", "WRITEUP*"])
 
     def check(self, *extra):
-        return super().check("--run", "wiki=" + self.real, *extra)
+        return super().check("--run", "wiki=" + self.real, *(list(self.only) + list(extra)))
 
     def test_repo_documents_trace(self):
-        code, out = run(["--repo", ROOT, "--run", "example=" + self.example, "--run", "wiki=" + self.real])
+        code, out = run(["--repo", ROOT, "--run", "example=" + self.example, "--run", "wiki=" + self.real]
+                        + self.only)
         self.assertEqual(code, 0, out)
         self.assertRegex(out, r"docs/lead\.svg: \d+ numbers: .* 0 FAIL")
+        if self.has_calibration:
+            self.assertRegex(out, r"docs/can-it-see\.svg: \d+ numbers: .* 0 FAIL")
         self.assertRegex(out, r"README\.md: \d+ numbers: .* 0 FAIL")
 
     def test_links_count_edit_fails_with_file_line(self):
@@ -422,7 +430,8 @@ class RealRun(ExampleBase):
         runs = [CC.load_run("example", self.example), CC.load_run("wiki", self.real)]
         allow = CC.load_allow(os.path.join(ROOT, CC.ALLOW_NAME))
         started = time.perf_counter()
-        result = CC.check(ROOT, CC.default_docs(ROOT), runs, allow)
+        docs = [d for d in CC.default_docs(ROOT) if self.has_calibration or "can-it-see" not in d]
+        result = CC.check(ROOT, docs, runs, allow)
         self.assertLess(time.perf_counter() - started, 2.0)
         self.assertEqual(result["fail"], 0)
 
