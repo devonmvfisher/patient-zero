@@ -530,6 +530,24 @@ def _csv_human(value, path, where):
     raise ValueError("%s %s: human must be true, yes, 1, false, no, 0 or empty" % (path, where))
 
 
+def _human_flag(value, path, where):
+    """The human flag from a CSV cell or a JSON value. Anything unclear is an error (fail closed).
+
+    JSON ``true``/``false``, the CSV words (true, yes, 1, false, no, 0, empty)
+    as strings, and the numbers 1 and 0 are understood, so a mapped column
+    that writes ``1`` or ``"yes"`` never lets a human speaker be named.
+    """
+    if value is _MISSING or value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return _csv_human(value, path, where)
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return value == 1
+    raise ValueError("%s %s: human must be true, yes, 1, false, no, 0 or empty" % (path, where))
+
+
 def _csv_seconds(value, path, where):
     try:
         unc = float(value.strip())
@@ -558,13 +576,11 @@ def generic_human_labels(path, field_map=None):
     For masking human handles in snippets (tools/peek.py). Never written out.
     """
     field_map = dict(field_map or {})
-    _sources_, records, cells = _generic_records(path, field_map)
+    _sources_, records, _cells = _generic_records(path, field_map)
     humans = set()
     with contextlib.closing(records):
         for where, _number, obj in records:
-            human, label = obj["human"], obj["agent"]
-            if cells:
-                human = human is not _MISSING and _csv_human(human, path, where)
+            human, label = _human_flag(obj["human"], path, where), obj["agent"]
             if human is True and isinstance(label, str) and label.strip():
                 humans.add(label.strip())
     return humans
@@ -603,9 +619,11 @@ def load_generic(path, field_map=None):
                 raise ValueError("%s %s: text must be a string" % (path, where))
             if obj["place"] is None or isinstance(obj["place"], (dict, list)):
                 raise ValueError("%s %s: place must be a string" % (path, where))
-            if isinstance(obj["agent"], (dict, list)):
-                raise ValueError("%s %s: agent must be a string or a number, not a JSON object or list "
-                                 "(with --map, point at a field inside it, such as author.name)" % (path, where))
+            for field in ("agent", "id", "group", "family", "time_grade"):  # str(dict) could carry a handle
+                if isinstance(obj[field], (dict, list)):
+                    raise ValueError("%s %s: %s must be a string or a number, not a JSON object or list "
+                                     "(with --map, point at a field inside it, such as author.name)"
+                                     % (path, where, field))
             row_id = (str(obj["id"]) if obj["id"] is not _MISSING and obj["id"] is not None
                       else "line-%d" % number)
             if row_id in seen_ids:
@@ -617,9 +635,7 @@ def load_generic(path, field_map=None):
             if label and is_ip_shaped(label):
                 stats["ip_shaped_labels_blanked"] += 1
                 label = ""
-            human = obj["human"]
-            if cells:
-                human = human is not _MISSING and _csv_human(human, path, where)
+            human = _human_flag(obj["human"], path, where)
             if not label:
                 agent, role = None, ROLE_BLANK
                 stats["blank_rows"] += 1
