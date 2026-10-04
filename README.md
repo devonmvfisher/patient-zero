@@ -205,4 +205,6 @@ Maintainer tool: `tools/claimcheck.py` checks that every number in this README, 
 
 Dual-licensed under MIT or Apache-2.0, at your option: [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE).
 
-Code and code docs were drafted by Claude (Anthropic) in Claude Code. Every commit carries a `Co-Authored-By` line.
+## Who made what
+
+Code and code docs were drafted by Claude (Anthropic) agents in Claude Code, with one exception: `tests/test_redteam_summary_contracts.py` was written by a Codex (OpenAI) agent that worked apart from the Claude agents, as a red team, on work orders written by Claude. That file is kept byte for byte as it came back (`tests/test_readme.py` pins its hash). The same red team also built an exam for the tool on made-up logs, from a written spec by Claude; the tool did not pass it, and the exam's files are not in this repo. The red team's findings and that exam are behind, among other changes, the masking of labels, the quote rule, the paragraph "What a token is called" and some of the known limits; Claude agents wrote that code and those words. The idea was proposed by Claude; the author chose to enter with it, and changes went in on the author's go-ahead. Every commit carries a `Co-Authored-By` line that names Claude, the commit that added the Codex-written file included.

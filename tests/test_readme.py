@@ -1,6 +1,6 @@
 """Guards for the README, the front door a judge or a stranger reads first.
 
-Standard library unittest only; no data needed. Four checks:
+Standard library unittest only; no data needed. Five checks:
 
 1. every repo path the README quotes exists, so no pointer goes nowhere;
 2. every "README.md, section ..." pointer in the code names a real heading;
@@ -8,10 +8,13 @@ Standard library unittest only; no data needed. Four checks:
    committed figure, docs/lead.svg, so a redrawn figure cannot leave stale
    numbers in the README (or the other way round);
 4. no command the README gives to copy draws a hand-picked tree over that
-   figure, so following the README cannot break check 3.
+   figure, so following the README cannot break check 3;
+5. the paragraph that says who drafted the code names the one file another
+   maker wrote, and that file is still the bytes that maker returned.
 """
 
 import glob
+import hashlib
 import html
 import os
 import re
@@ -119,6 +122,25 @@ class Readme(unittest.TestCase):
             if "--lead" in words and "--svg" in words[:-1]:
                 target = words[words.index("--svg") + 1]
                 self.assertTrue(target.startswith("out/"), "%s would be drawn over by: %s" % (target, line))
+
+    def test_who_drafted_the_code_names_the_file_another_maker_wrote(self):
+        """Claude did not write every file here, and the README must not read as if it did.
+
+        tests/test_redteam_summary_contracts.py was written by a Codex agent working as a red team
+        and was taken byte for byte: the SHA-256 below is the file that came back. The paragraph
+        that says who drafted the code must name that file and its maker. If the file is ever
+        edited, this fails, and "byte for byte" has to leave the README with it.
+        """
+        named = "tests/test_redteam_summary_contracts.py"
+        who = [p for p in self.md.split("\n\n") if "drafted by Claude" in p and "Co-Authored-By" in p]
+        self.assertEqual(len(who), 1, "one paragraph says who drafted the code")
+        self.assertIn("`%s`" % named, who[0])
+        self.assertIn("Codex", who[0])
+        self.assertIn("byte for byte", who[0])
+        with open(os.path.join(ROOT, *named.split("/")), "rb") as fh:
+            self.assertEqual(hashlib.sha256(fh.read()).hexdigest(),
+                             "5e7d115b76a7afcf58b62352d71bb20767da863a0e815523252494891e4a7f99",
+                             "%s is not the file the red team returned" % named)
 
 
 if __name__ == "__main__":
