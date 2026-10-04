@@ -17,7 +17,9 @@ Token classes (PLAN section 4.5)
     A line (or a backtick span) that starts with a known command name, after
     an optional ``$``/``%``/``>`` prompt and ``sudo``. The token is the command
     name plus its sub-command when there is one (``git clone``, ``pip install``).
-    Nothing is ever run.
+    Nothing is ever run. In a log row a line that starts with ``> `` is a quote
+    (see Quoted lines), so there the ``>`` prompt counts only inside a backtick
+    span.
 ``code``
     Code words: ``snake_case`` and ``UPPER_SNAKE`` names, ``lowerCamelCase``
     names, dotted calls (``mod.func(`` gives ``mod.func``) and one-word
@@ -41,6 +43,18 @@ Token classes (PLAN section 4.5)
 
 Before extraction, percent-escapes are decoded (``%2F`` to ``/``, two rounds) and
 IP-shaped values revealed by decoding are masked again.
+
+Quoted lines
+------------
+In a log row, a line that starts with ``> `` (Markdown and mail), or with
+``&gt; `` (the same mark as Slack's API writes it), is quoted text: its writer
+is repeating someone else's line. ``row_tokens`` reads no token from such a
+line, so quoting is neither a use nor an exposure, and a row that only quotes
+a token is not one of the token's rows. The mark must be the first characters
+of the line. Text quoted any other way is read as the writer's own words. Two
+texts are not log rows and are read whole (``row_tokens(text, whole=True)``):
+a given text, whose tokens are handed down however it is laid out, and an
+off-wiki text, where the question is only whether the token is there.
 
 Filters, in order
 -----------------
@@ -94,6 +108,7 @@ MIN_AGENTS = 3
 FIRST_USERS = 3
 MAX_PHRASE_SHARE = 0.02
 PHRASE_CAP_FLOOR = 25  # never call a phrase common below this many agent rows
+QUOTE_MARKS = ("> ", "&gt; ")  # a log line that starts with one is quoted text, not its writer's own words
 
 
 class Token(NamedTuple):
@@ -443,12 +458,24 @@ def decode_line(line):
     return scrub_ips(line)[0]
 
 
-def row_tokens(text):
-    """Tokens in one row's text: ({key: (cls, kind, value, risky types)}, stoplisted)."""
+def is_quote(line):
+    """True when a line is quoted text: it starts with ``> `` or ``&gt; `` (QUOTE_MARKS)."""
+    return line.startswith(QUOTE_MARKS)
+
+
+def row_tokens(text, whole=False):
+    """Tokens in one row's text: ({key: (cls, kind, value, risky types)}, stoplisted).
+
+    Quoted lines (``is_quote``) are skipped: they are not the row's own words,
+    so no token is read from them. ``whole=True`` reads them too; it is for
+    texts that are not log rows (a given text, an off-wiki text).
+    """
     out = {}
     stopped = Counter()
     for line in text.split("\n"):
         if not line.strip():
+            continue
+        if not whole and is_quote(line):
             continue
         if "%" in line:
             line = decode_line(line)
@@ -468,10 +495,13 @@ def row_tokens(text):
 
 
 def given_keys(texts):
-    """Token keys found in shared goal or prompt texts (dropped as handed down)."""
+    """Token keys found in shared goal or prompt texts (dropped as handed down).
+
+    A given text is read whole: a token on a quoted line of it is handed down too.
+    """
     keys = set()
     for text in texts or ():
-        keys.update(row_tokens(text)[0])
+        keys.update(row_tokens(text, whole=True)[0])
     return keys
 
 

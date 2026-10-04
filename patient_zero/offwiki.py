@@ -357,7 +357,7 @@ def find_hits(events, tokens):
     for idx, ev in enumerate(events):
         keys = set(ev.keys & kept) if ev.keys else set()
         if ev.text:
-            found, _stopped = row_tokens(ev.text)
+            found, _stopped = row_tokens(ev.text, whole=True)  # off-wiki: is the token there, quoted or not
             keys.update(k for k in found if k in kept)
         for key in sorted(keys):
             hits[key].append((ev.source, ev.time, ev.seen_by, idx))

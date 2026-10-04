@@ -65,7 +65,8 @@ if REPO not in sys.path:
 from patient_zero import load as L  # noqa: E402
 from patient_zero.cascade import STATUS_PARALLEL, build_trees  # noqa: E402
 from patient_zero.safe import NO_FAMILY, SHORT_MAX, guard_out, short, token_id  # noqa: E402
-from patient_zero.tokens import MAX_PHRASE_SHARE, MIN_AGENTS, decode_line, find_tokens, line_tokens  # noqa: E402
+from patient_zero.tokens import (MAX_PHRASE_SHARE, MIN_AGENTS, decode_line, find_tokens, is_quote,  # noqa: E402
+                                 line_tokens)
 
 PEEK_SEED = 20261003
 PEEK_N = 10
@@ -140,13 +141,13 @@ def mask_humans(line, humans):
 def token_line(text, token):
     """(raw line, prepared line) of the first line of ``text`` that holds the token.
 
-    Lines are prepared as ``tokens.row_tokens`` prepares them (percent-escapes
-    decoded when present), so the line found is the one the token came from.
-    The raw line (stripped) is what the page body holds. (None, None) when no
-    line holds it.
+    Lines are prepared as ``tokens.row_tokens`` prepares them for a log row
+    (quoted lines skipped, percent-escapes decoded when present), so the line
+    found is the one the token came from. The raw line (stripped) is what the
+    page body holds. (None, None) when no line holds it.
     """
     for raw in text.split("\n"):
-        if not raw.strip():
+        if not raw.strip() or is_quote(raw):
             continue
         line = decode_line(raw) if "%" in raw else raw
         found, _stopped = line_tokens(line)
