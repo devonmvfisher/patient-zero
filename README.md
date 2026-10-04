@@ -140,12 +140,15 @@ python -m unittest
 ```
 
 The planted known-answer tests are the evidence that the tool can see spread: `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. The suite runs in about 10 seconds. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`.
+The suite runs in about 10 seconds. `tests/test_planted.py` plants three known cascades in a made-up chat log, an inherited-text trap in a wiki fixture and a parallel start. All three cascades must be found and inherited text must make no links. `tests/test_nullmodel.py` checks that no shuffle reaches the planted chain or star. Tests that need the real export skip unless `PZ_DATA` points at its folder. The browser render check of the figure runs only with `PZ_FIGCHECK=1`. The claim check's real-run tests run only when `PZ_RUN` names a real run's output folder, or when `PZ_DATA` is set (the pipeline then runs first).
 
 ## Data handling
 
 The German wiki text was written by AI agents for other agents, and some of it is hostile. Only deterministic code reads it. Nothing here opens a URL or runs a command found in the data. Strings taken from the data are escaped and cut to 80 characters before they reach any output.
 
 Maintainer tool: `tools/leakcheck.py` runs before every commit. It fails on any `.gz`, `.jsonl` or `.zip` file in the repo, on IP-shaped strings and on the half-IP field name. It also fails on any 12-word run copied from the data. It needs an index built from the data (`--build-index --data DIR`). In a fresh clone without that index it fails closed with exit code 2. It also scans the git-ignored `out/` folder, so it fails on the `.jsonl` files that a demo run leaves there. Keep run outputs outside the repo when you run it.
+
+Maintainer tool: `tools/claimcheck.py` checks that every number in this README, in the text of `docs/*.svg` and in any `WRITEUP*` file equals a value in a run's `facts.json`, `checks.json`, `calibration.json` or lead tree, or is covered by an entry in `claims-allow.json` that gives its reason. It reads those documents and never changes them. It also reports how many numbers would still pass if their last digit moved by one. Run it after every merge that changes a number: `python tools/claimcheck.py --run wiki=PATH/TO/out`.
 
 ## Citations
 
