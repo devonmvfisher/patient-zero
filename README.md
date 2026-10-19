@@ -1,6 +1,6 @@
 # patient-zero
 
-*Code docs drafted by Claude (Anthropic). The findings and the story are in the author's own write-up, which is submitted with the entry and is not part of these docs.*
+*Code docs drafted by Claude (Anthropic). The author's own write-up, in his words, is [WRITEUP.md](WRITEUP.md); it is not part of these docs.*
 
 patient-zero traces how tokens spread between AI agents in a shared log (hosts, file names, code words, naming conventions, rare phrases), and it tests its own tracer. Its calibration plants known spread on the log's own rows and measures what the chance test can see, what it is blind to, and where the test itself is biased.
 
